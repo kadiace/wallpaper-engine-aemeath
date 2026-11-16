@@ -18,7 +18,7 @@ Timeline is optional in media-player integrations; absent duration/position is s
 
 ## Character selection and scale
 
-Wallpaper Engine's documented SceneScript cursor API **does not provide a right-click event or a right mouse button state**. Native right-click may open the Windows desktop context menu instead, and cannot be reliably intercepted by a Scene wallpaper. Therefore, the working supported input for the menu is: **hold the left mouse button over a stationary character for 650ms** (without moving the pointer more than 7 scene units). The menu is designed so an external Windows helper can add a right-click trigger later without changing UI code.
+Wallpaper Engine's documented SceneScript cursor API **does not provide a right-click event or a right mouse button state**. Native right-click may open the Windows desktop context menu instead, and cannot be reliably intercepted by a Scene wallpaper. Therefore, the working supported input for the menu is: **hold the left mouse button over a stationary character for 650ms** (without moving the pointer more than 7 scene units). The menu is designed so an external Windows helper can add a right-click trigger later without changing UI code. The menu's position is locked while dragging the scale slider, so the slider does not move out from under the pointer.
 
 Menu shows eleven GIF selections, `idle1`–`idle4` and `screen1`–`screen7`. Clicking a name immediately displays that GIF and pins it until the next user interaction; selecting an idle selects A, selecting a screen selects B. While B is pinned, periodic random screen changes are paused. Media playback still overrides with `aemeath`.
 
@@ -49,3 +49,7 @@ Official docs:
 - https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/media.html
 - https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/cursor.html
 - https://docs.wallpaperengine.io/en/scene/userproperties/usershortcut.html
+
+## Further input fixes
+
+A 650ms hold sets a dedicated `menuHoldOpened` flag, and the corresponding release is ignored as a normal click (even if the mouse was held much longer). Changing scale no longer moves the menu itself. When the media provider supplies no timeline, the time readout displays `--:-- / --:--` rather than implying a valid 0:00 duration.

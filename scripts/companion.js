@@ -237,6 +237,14 @@ function processEvents() {
         } else if (ev.type === 'up') {
             if (!pointerPressed) continue;
             pointerPressed = false;
+            if (menuHoldOpened) {
+                // Releasing a long press is not a click and cannot close the
+                // menu or accidentally contribute to an A/B double-click.
+                releaseGrab();
+                menuHoldOpened = false;
+                resetClickSequence();
+                continue;
+            }
             const dx = ev.x - pointerDownX, dy = ev.y - pointerDownY;
             const moved = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
             const wasDrag = dragging || dragged || moved;
@@ -497,7 +505,8 @@ const MANUAL_NAMES = ['idle1','idle2','idle3','idle4',
 let sizeMultiplier = 1;
 let manualVisual = null;
 let menuOpen = false, sliderDragging = false, menuHoldOpened = false;
-let menuCenterX = 960, menuCenterY = 540, mediaCenterX = 960, mediaCenterY = 540;
+let menuCenterX = 960, menuCenterY = 540, menuAnchorX = 960, menuAnchorY = 540;
+let mediaCenterX = 960, mediaCenterY = 540;
 let ui = {};
 let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
@@ -575,6 +584,12 @@ function initUi() {
 }
 function showMenu() {
     if (menuOpen) { menuOpen = false; return; }
+    const size = bounds();
+    // Freeze the menu anchor while the scale slider is manipulated.
+    // Otherwise scaling the character moves the menu and slider under the pointer.
+    menuAnchorX = clamp(x + canvasHalfSize() + UI_LAYOUT.menuW/2 + 14,
+        UI_LAYOUT.menuW/2+10, size.width-UI_LAYOUT.menuW/2-10);
+    menuAnchorY = clamp(y, UI_LAYOUT.menuH/2+10, size.height-UI_LAYOUT.menuH/2-10);
     menuOpen = true;
     sliderDragging = false;
     manualVisual = null;
@@ -646,9 +661,8 @@ function updateUiGeometry() {
         if(bubble) uiPosition(btn,mx+xs[i],my-66);
     }
     // Menu is detached from the skin and built from named reusable components.
-    menuCenterX = clamp(x+canvasHalfSize()+UI_LAYOUT.menuW/2+14,
-        UI_LAYOUT.menuW/2+10,size.width-UI_LAYOUT.menuW/2-10);
-    menuCenterY = clamp(y,UI_LAYOUT.menuH/2+10,size.height-UI_LAYOUT.menuH/2-10);
+    menuCenterX = menuAnchorX;
+    menuCenterY = menuAnchorY;
     const cx=menuCenterX, cy=menuCenterY, top=cy+UI_LAYOUT.menuH/2;
     const mPlace=(name,px,py)=>{
         const layer=ui[name];if(!layer)return;
@@ -681,7 +695,8 @@ function updateMediaData(dt) {
         ui.media_title.text=mediaTitle || 'Unknown track';
         ui.media_artist.text=mediaArtist || 'Unknown artist';
         ui.media_album.text=mediaAlbum || '';
-        ui.media_clock.text=fmtTime(mediaPosition)+' / '+fmtTime(mediaDuration);
+        ui.media_clock.text=(mediaTimelineAt<0 ? '--:--' : fmtTime(mediaPosition))
+            +' / '+(mediaDuration>0 ? fmtTime(mediaDuration) : '--:--');
         ui.media_transport_play.text=mediaPaused ? '>' : 'II';
         ui.menu_scale_label.text='SCALE '+sizeMultiplier.toFixed(2)+'x';
     }
