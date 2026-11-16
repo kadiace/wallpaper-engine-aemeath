@@ -1,0 +1,6 @@
+{
+	"height" : 200,
+	"material" : "materials/screen1.json",
+	"nopadding" : true,
+	"width" : 200
+}

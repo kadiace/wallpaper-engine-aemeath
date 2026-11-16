@@ -13,5 +13,7 @@
 			}
 		}
 	},
-	"title" : "Aemeath, Digital Ghost"
+	"title" : "Aemeath, Digital Ghost",
+	"type" : "scene",
+	"version" : 0
 }

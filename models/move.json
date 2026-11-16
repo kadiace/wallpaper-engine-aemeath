@@ -1,0 +1,6 @@
+{
+	"height" : 200,
+	"material" : "materials/move.json",
+	"nopadding" : true,
+	"width" : 200
+}

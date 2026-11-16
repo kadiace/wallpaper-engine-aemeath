@@ -9,3 +9,8 @@ Desktop.ini
 # Editor temporary files
 *.tmp
 *.bak
+__pycache__/
+
+#AI
+.omo/
+.playwright-mcp/
