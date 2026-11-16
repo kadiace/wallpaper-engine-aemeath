@@ -10,9 +10,9 @@ const STORAGE_KEY = 'aemeath.companion.v1';
 const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
-const DOUBLE_CLICK_SECONDS = 0.36;
-const MIN_DOUBLE_CLICK_SECONDS = 0.08; // Ignore impossible/duplicated rapid click events.
-const DOUBLE_CLICK_DISTANCE = 65;
+// Windows defaults to a 500ms double-click interval; require an 8-unit position window.
+const DOUBLE_CLICK_SECONDS = 0.5;
+const DOUBLE_CLICK_DISTANCE = 8;
 
 let layers = {};
 let x = 960, y = 540, facing = 1;
@@ -25,7 +25,11 @@ let actionDelay = 3;
 let screenDelay = 20, screenPlayLeft = 0;
 let armed = false, dragging = false, dragged = false;
 let grabX = 0, grabY = 0, pressX = 0, pressY = 0;
-let suppressClickUntil = 0, lastClickTime = -100, lastClickX = 0, lastClickY = 0;
+let suppressClickUntil = 0;
+// A continuous burst of 3+ physical clicks is NOT a double-click.
+// We defer A/B switching until 500ms after the second click to reject bursts.
+let clickBurst = 0, burstLastTime = -100, burstX = 0, burstY = 0;
+let burstMode = 'A';
 // Only a full physical down/up sequence may issue ONE click.
 // Separate callback scripts can report duplicate cursorClick for the same release.
 let pointerPressed = false, clickReady = false;
@@ -117,6 +121,7 @@ function setMode(next) {
     dragged = false;
     pointerPressed = false;
     clickReady = false;
+    resetClickSequence();
     target = null;
     if (mode === 'B') {
         falling = true;
@@ -154,6 +159,41 @@ function singleClick() {
     }
 }
 
+// Start a fresh sequence only after a pause or a meaningful cursor movement.
+// Subsequent 3rd/4th clicks inside the same sequence cancel the A/B toggle.
+function resetClickSequence() {
+    clickBurst = 0;
+    burstLastTime = -100;
+    burstX = 0;
+    burstY = 0;
+}
+
+function registerPhysicalClick(ev) {
+    const samePlace = Math.abs(ev.x - burstX) <= DOUBLE_CLICK_DISTANCE
+        && Math.abs(ev.y - burstY) <= DOUBLE_CLICK_DISTANCE;
+    const continues = clickBurst > 0 && mode === burstMode
+        && elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS && samePlace;
+    if (!continues) {
+        clickBurst = 1;
+        burstMode = mode;
+    } else {
+        clickBurst += 1;
+    }
+    burstLastTime = elapsed;
+    burstX = ev.x;
+    burstY = ev.y;
+    // Preserve immediate single-click idle / screen animation reactions.
+    singleClick();
+}
+
+function finishClickSequence() {
+    if (clickBurst === 0 || pointerPressed) return;
+    if (elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS) return;
+    const exactlyTwo = clickBurst === 2;
+    resetClickSequence();
+    if (exactlyTwo && !musicPlaying) setMode(mode === 'A' ? 'B' : 'A');
+}
+
 function processEvents() {
     if (!shared.aemeathEvents) shared.aemeathEvents = [];
     const events = shared.aemeathEvents.splice(0);
@@ -163,7 +203,9 @@ function processEvents() {
             if (pointerPressed) continue; // One physical down can be forwarded by several layers.
             pointerPressed = true;
             clickReady = false;
-            if (mode === 'A' && !musicPlaying) {
+            // Media playback locks the visible GIF, not the character's position.
+            // Dragging aemeath works in A while music is playing.
+            if (mode === 'A') {
                 armed = true;
                 dragging = false;
                 dragged = false;
@@ -184,24 +226,10 @@ function processEvents() {
             clickReady = false; // Consume the physical click; duplicate callbacks are ignored.
             if (elapsed < suppressClickUntil || dragged) {
                 dragged = false;
-                lastClickTime = -100;
+                resetClickSequence();
                 continue;
             }
-            const timeSincePreviousClick = elapsed - lastClickTime;
-            const distanceSquared = (ev.x - lastClickX) * (ev.x - lastClickX)
-                + (ev.y - lastClickY) * (ev.y - lastClickY);
-            const doubleClick = timeSincePreviousClick >= MIN_DOUBLE_CLICK_SECONDS
-                && timeSincePreviousClick <= DOUBLE_CLICK_SECONDS
-                && distanceSquared <= DOUBLE_CLICK_DISTANCE * DOUBLE_CLICK_DISTANCE;
-            if (doubleClick) {
-                lastClickTime = -100;
-                setMode(mode === 'A' ? 'B' : 'A');
-            } else {
-                lastClickTime = elapsed;
-                lastClickX = ev.x;
-                lastClickY = ev.y;
-                singleClick();
-            }
+            registerPhysicalClick(ev);
         }
     }
 }
@@ -354,6 +382,7 @@ export function update(value) {
     const dt = clamp(engine.frametime, 0, 0.05);
     elapsed += dt;
     processEvents();
+    finishClickSequence();
     if (mode === 'A') stepA(dt);
     else stepB(dt);
     saveDelay -= dt;
@@ -381,11 +410,12 @@ export function mediaPlaybackChanged(event) {
         releaseGrab();
         pointerPressed = false;
         clickReady = false;
-        lastClickTime = -100;
+        resetClickSequence();
         setIdle(false);
         persist();
     } else {
         // Media ends or pauses: remain in A and resume regular behavior.
+        resetClickSequence();
         setIdle(true);
         persist();
     }

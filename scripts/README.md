@@ -4,9 +4,9 @@ The Scene is 1920 × 1080 **canvas units** (16:9 FHD; scales to 3840 × 2160 UHD
 
 ## Controls
 
-- **A state:** Freely roam on X and Y; move animation flips for left/right movement. Idle chooses among `idle1`–`idle4`. A single click instantly chooses a different idle without changing state. Hold and drag the sprite to move it; on release, stop at that exact position without momentum and immediately play a **different** idle GIF than the one shown before dragging. Occasionally follows a nearby cursor when choosing its next walking target.
-- **B state:** Double-click the sprite in A to drop to the bottom of the scene. Stay fixed there. Play one of `screen1`–`screen7` at random every 10–30 seconds, with the animation parked on its first frame between plays. A single click immediately chooses and plays a different screen animation without changing state. Double-click returns to A. State changes require two distinct mouse press/release cycles within 0.08–0.36 seconds and within 65 canvas units. Duplicate click callbacks for a single release are ignored.
-- **Media:** Windows media-session **playing** (music or video) forces A and displays `aemeath` at its existing 0.2 scale. Double-click cannot enter B while media is playing. Media paused or stopped hides `aemeath` and keeps A active (does not return to B).
+- **A state:** Freely roam on X and Y; move animation flips for left/right movement. Idle chooses among `idle1`–`idle4`. A single click instantly chooses a different idle without changing state. Hold and drag the sprite to move it; on release, stop at that exact position without momentum and immediately play a **different** idle GIF than the one shown before dragging. During media playback, the character remains on `aemeath` while it is dragged (no `drag` visual replacement). Occasionally follows a nearby cursor when choosing its next walking target.
+- **B state:** Double-click the sprite in A to drop to the bottom of the scene. Stay fixed there. Play one of `screen1`–`screen7` at random every 10–30 seconds, with the animation parked on its first frame between plays. A single click immediately chooses and plays a different screen animation without changing state. Double-click returns to A. State changes require two distinct mouse press/release cycles within 0.5 seconds and within an 8-unit X/Y window. A/B switching is confirmed only after 0.5 seconds without a third click, so bursts of 3+ clicks do not change state. Duplicate click callbacks for a single release are ignored.
+- **Media:** Windows media-session **playing** (music or video) forces A and displays `aemeath` at its existing 0.2 scale. Double-click cannot enter B while media is playing, but dragging to reposition `aemeath` remains available. Media paused or stopped hides `aemeath` and keeps A active (does not return to B).
 - **Save:** Current canvas-space X/Y, dimensions and A/B state are persisted per screen with SceneScript `localStorage`, periodically and after interactions. Old 1000×1000 saved coordinates are proportionally migrated to FHD once. Reset Wallpaper Engine wallpaper data to clear them.
 
 Media integration only works for players integrated with Windows media sessions and must be enabled in Wallpaper Engine settings. SceneScript mouse events only work on **Solid** image layers; the controller sets `solid = true` on all 14 layers. Desktop icons and application windows can intercept mouse events; this is a wallpaper interaction, not a global mouse hook.
@@ -35,10 +35,14 @@ External GitHub validation checks source/JSON consistency and deterministic beha
 1. Single click in A => different idle, still A.
 2. Single click in B => different screen animation, still B.
 3. One physical down/up followed by two cursorClick callbacks => one click, no A/B change.
-4. Two separate down/up/click cycles inside the double-click interval => exactly one A/B change.
-5. Slow clicks (>0.36 s apart) => two single actions, no A/B change.
+4. Exactly two separate down/up/click cycles within 500ms and 8 units => one A/B change only after the click burst ends.
+5. Slow clicks (>500ms apart), spatially distant clicks, or bursts of 3+ rapid clicks => no A/B change.
 6. Playback is the only automatic override: starting media in B forces A, and media prevents a double-click into B.
 
 ## Drag-release regression check
 
 In A, note the current `idle1`–`idle4`, drag the bot and release it. The bot must stay at its release coordinates and immediately show a **different** idle GIF. Releasing a normal click without dragging must not trigger an extra idle change.
+
+## Media drag regression
+
+While a Windows-integrated media player is playing, `aemeath` remains the visible GIF (0.2 scale). Press on the character, move the cursor while held and release it: its position must update and stay at the drop point, without briefly showing `drag` or switching to B. Stop playback: ordinary A idle behavior resumes at the saved position.
