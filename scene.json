@@ -55,6 +55,7 @@
 			"image" : "models/aemeath.json",
 			"name" : "aemeath",
 			"origin" : "500.00000 500.00000 0.00000",
+			"scale" : "0.20000 0.20000 1.00000",
 			"size" : "1000.00000 1000.00000",
 			"visible" : false
 		},
