@@ -10,9 +10,10 @@ const STORAGE_KEY = 'aemeath.companion.v1';
 const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
-// Windows defaults to a 500ms double-click interval; require an 8-unit position window.
+// Windows defaults to a 500ms double-click interval. Allow small cursor drift
+// in canvas coordinates (especially when wallpaper scaling differs from desktop pixels).
 const DOUBLE_CLICK_SECONDS = 0.5;
-const DOUBLE_CLICK_DISTANCE = 8;
+const DOUBLE_CLICK_DISTANCE = 24;
 
 let layers = {};
 let x = 960, y = 540, facing = 1;
@@ -32,7 +33,8 @@ let clickBurst = 0, burstLastTime = -100, burstX = 0, burstY = 0;
 let burstMode = 'A';
 // Only a full physical down/up sequence may issue ONE click.
 // Separate callback scripts can report duplicate cursorClick for the same release.
-let pointerPressed = false, clickReady = false;
+let pointerPressed = false;
+let pointerDownX = 0, pointerDownY = 0, pointerDownTime = -100;
 let elapsed = 0, saveDelay = 5;
 
 function random(min, max) {
@@ -120,7 +122,6 @@ function setMode(next) {
     dragging = false;
     dragged = false;
     pointerPressed = false;
-    clickReady = false;
     resetClickSequence();
     target = null;
     if (mode === 'B') {
@@ -200,11 +201,18 @@ function processEvents() {
     for (let i = 0; i < events.length; i++) {
         const ev = events[i];
         if (ev.type === 'down') {
-            if (pointerPressed) continue; // One physical down can be forwarded by several layers.
+            if (pointerPressed) {
+                // Duplicate down callbacks from overlapping layers can arrive on the
+                // same frame. If a previous press had no up (cursor left the layer),
+                // let a later physical press recover from that missing event.
+                if (elapsed - pointerDownTime <= 0.03) continue;
+                releaseGrab();
+                resetClickSequence();
+            }
             pointerPressed = true;
-            clickReady = false;
-            // Media playback locks the visible GIF, not the character's position.
-            // Dragging aemeath works in A while music is playing.
+            pointerDownTime = elapsed;
+            pointerDownX = ev.x;
+            pointerDownY = ev.y;
             if (mode === 'A') {
                 armed = true;
                 dragging = false;
@@ -217,29 +225,35 @@ function processEvents() {
                 action = 'idle';
             }
         } else if (ev.type === 'up') {
-            if (!pointerPressed) continue; // Ignore duplicate or unmatched releases.
+            if (!pointerPressed) continue;
             pointerPressed = false;
-            clickReady = true;
+            // CursorUp is emitted when released over a solid layer. CursorClick
+            // is an additional derived callback and may be absent or duplicated
+            // when the visible GIF layer changes between two clicks.
+            const moveX = ev.x - pointerDownX, moveY = ev.y - pointerDownY;
+            const moved = moveX * moveX + moveY * moveY >
+                DRAG_THRESHOLD * DRAG_THRESHOLD;
+            const wasDrag = dragging || dragged || moved;
             releaseGrab();
-        } else if (ev.type === 'click') {
-            if (!clickReady) continue; // A click must follow a fresh down/up pair.
-            clickReady = false; // Consume the physical click; duplicate callbacks are ignored.
-            if (elapsed < suppressClickUntil || dragged) {
+            if (wasDrag || elapsed < suppressClickUntil) {
                 dragged = false;
                 resetClickSequence();
                 continue;
             }
             registerPhysicalClick(ev);
         }
+        // Deliberately ignore 'click': it is derived from the same down/up
+        // input pair and must not increment the physical click count again.
     }
 }
+
 function stepA(dt) {
     if (armed) {
         if (!input.cursorLeftDown) {
             releaseGrab();
-            // The cursor may have been released outside the sprite (no cursorUp callback).
-            // Disallow treating any stale click event as a new physical press.
-            pointerPressed = false;
+            // A cursorUp event may arrive during the next frame; do not clear
+            // pointerPressed here or that release would be discarded. A future
+            // genuine cursorDown can recover if no cursorUp arrives at all.
         } else {
             const cursor = input.cursorWorldPosition;
             if (cursor) {
@@ -409,7 +423,6 @@ export function mediaPlaybackChanged(event) {
         if (mode === 'B') setMode('A');
         releaseGrab();
         pointerPressed = false;
-        clickReady = false;
         resetClickSequence();
         setIdle(false);
         persist();

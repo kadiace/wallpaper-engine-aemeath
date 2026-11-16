@@ -5,7 +5,7 @@ The Scene is 1920 × 1080 **canvas units** (16:9 FHD; scales to 3840 × 2160 UHD
 ## Controls
 
 - **A state:** Freely roam on X and Y; move animation flips for left/right movement. Idle chooses among `idle1`–`idle4`. A single click instantly chooses a different idle without changing state. Hold and drag the sprite to move it; on release, stop at that exact position without momentum and immediately play a **different** idle GIF than the one shown before dragging. During media playback, the character remains on `aemeath` while it is dragged (no `drag` visual replacement). Occasionally follows a nearby cursor when choosing its next walking target.
-- **B state:** Double-click the sprite in A to drop to the bottom of the scene. Stay fixed there. Play one of `screen1`–`screen7` at random every 10–30 seconds, with the animation parked on its first frame between plays. A single click immediately chooses and plays a different screen animation without changing state. Double-click returns to A. State changes require two distinct mouse press/release cycles within 0.5 seconds and within an 8-unit X/Y window. A/B switching is confirmed only after 0.5 seconds without a third click, so bursts of 3+ clicks do not change state. Duplicate click callbacks for a single release are ignored.
+- **B state:** Double-click the sprite in A to drop to the bottom of the scene. Stay fixed there. Play one of `screen1`–`screen7` at random every 10–30 seconds, with the animation parked on its first frame between plays. A single click immediately chooses and plays a different screen animation without changing state. Double-click returns to A. State changes require exactly two distinct physical mouse press/release cycles within 0.5 seconds and within a 24-unit X/Y window. A/B switching is confirmed 0.5 seconds after the second release if there was no third click; bursts of 3+ clicks do not change state. The derived cursorClick callback is not counted, preventing missed or duplicated click reports during GIF changes.
 - **Media:** Windows media-session **playing** (music or video) forces A and displays `aemeath` at its existing 0.2 scale. Double-click cannot enter B while media is playing, but dragging to reposition `aemeath` remains available. Media paused or stopped hides `aemeath` and keeps A active (does not return to B).
 - **Save:** Current canvas-space X/Y, dimensions and A/B state are persisted per screen with SceneScript `localStorage`, periodically and after interactions. Old 1000×1000 saved coordinates are proportionally migrated to FHD once. Reset Wallpaper Engine wallpaper data to clear them.
 
@@ -34,8 +34,8 @@ External GitHub validation checks source/JSON consistency and deterministic beha
 
 1. Single click in A => different idle, still A.
 2. Single click in B => different screen animation, still B.
-3. One physical down/up followed by two cursorClick callbacks => one click, no A/B change.
-4. Exactly two separate down/up/click cycles within 500ms and 8 units => one A/B change only after the click burst ends.
+3. One physical down/up followed by two cursorClick callbacks => one click, no A/B change (cursorClick is informational only).
+4. Exactly two separate down/up cycles within 500ms and 24 canvas units => one A/B change after the burst ends, even if cursorClick never fires.
 5. Slow clicks (>500ms apart), spatially distant clicks, or bursts of 3+ rapid clicks => no A/B change.
 6. Playback is the only automatic override: starting media in B forces A, and media prevents a double-click into B.
 
@@ -46,3 +46,7 @@ In A, note the current `idle1`–`idle4`, drag the bot and release it. The bot m
 ## Media drag regression
 
 While a Windows-integrated media player is playing, `aemeath` remains the visible GIF (0.2 scale). Press on the character, move the cursor while held and release it: its position must update and stay at the drop point, without briefly showing `drag` or switching to B. Stop playback: ordinary A idle behavior resumes at the saved position.
+
+## Click-event fix
+
+The previous controller only registered a click after a strict `cursorDown` + `cursorUp` + `cursorClick` chain and accidentally cleared `pointerPressed` when `input.cursorLeftDown` became false before `cursorUp` was dispatched. It also required two clicks to land within 8 canvas units. The new controller counts a completed **down/up** pair on release, uses a 24-unit tolerance, and treats `cursorClick` as optional; dragging and duplicated callbacks do not register extra clicks. Exactly two clicks within 500ms (without a third) switch modes after the final 500ms quiet window. SceneScript is still subject to Wallpaper Engine desktop input interception.
