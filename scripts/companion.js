@@ -136,7 +136,8 @@ function releaseGrab() {
         dragged = true;
         suppressClickUntil = elapsed + 0.25;
         stayOnScreen();
-        setIdle(false);
+        // Pick a different idle animation than the one shown before dragging.
+        setIdle(true);
         actionDelay = random(2.5, 4);
         persist();
     }
