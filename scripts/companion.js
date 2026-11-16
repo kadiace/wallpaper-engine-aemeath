@@ -11,10 +11,11 @@ const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
 const DOUBLE_CLICK_SECONDS = 0.36;
+const MIN_DOUBLE_CLICK_SECONDS = 0.08; // Ignore impossible/duplicated rapid click events.
 const DOUBLE_CLICK_DISTANCE = 65;
 
 let layers = {};
-let x = 500, y = 500, facing = 1;
+let x = 960, y = 540, facing = 1;
 let mode = 'A', action = 'idle';
 let idleName = 'idle1', screenName = 'screen1';
 let musicPlaying = false;
@@ -25,6 +26,9 @@ let screenDelay = 20, screenPlayLeft = 0;
 let armed = false, dragging = false, dragged = false;
 let grabX = 0, grabY = 0, pressX = 0, pressY = 0;
 let suppressClickUntil = 0, lastClickTime = -100, lastClickX = 0, lastClickY = 0;
+// Only a full physical down/up sequence may issue ONE click.
+// Separate callback scripts can report duplicate cursorClick for the same release.
+let pointerPressed = false, clickReady = false;
 let elapsed = 0, saveDelay = 5;
 
 function random(min, max) {
@@ -55,7 +59,8 @@ function stayOnScreen() {
 }
 
 function persist() {
-    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y });
+    const size = bounds();
+    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y, width: size.width, height: size.height });
 }
 
 function setIdle(change) {
@@ -110,6 +115,8 @@ function setMode(next) {
     armed = false;
     dragging = false;
     dragged = false;
+    pointerPressed = false;
+    clickReady = false;
     target = null;
     if (mode === 'B') {
         falling = true;
@@ -152,6 +159,9 @@ function processEvents() {
     for (let i = 0; i < events.length; i++) {
         const ev = events[i];
         if (ev.type === 'down') {
+            if (pointerPressed) continue; // One physical down can be forwarded by several layers.
+            pointerPressed = true;
+            clickReady = false;
             if (mode === 'A' && !musicPlaying) {
                 armed = true;
                 dragging = false;
@@ -164,15 +174,23 @@ function processEvents() {
                 action = 'idle';
             }
         } else if (ev.type === 'up') {
+            if (!pointerPressed) continue; // Ignore duplicate or unmatched releases.
+            pointerPressed = false;
+            clickReady = true;
             releaseGrab();
         } else if (ev.type === 'click') {
+            if (!clickReady) continue; // A click must follow a fresh down/up pair.
+            clickReady = false; // Consume the physical click; duplicate callbacks are ignored.
             if (elapsed < suppressClickUntil || dragged) {
                 dragged = false;
+                lastClickTime = -100;
                 continue;
             }
+            const timeSincePreviousClick = elapsed - lastClickTime;
             const distanceSquared = (ev.x - lastClickX) * (ev.x - lastClickX)
                 + (ev.y - lastClickY) * (ev.y - lastClickY);
-            const doubleClick = elapsed - lastClickTime <= DOUBLE_CLICK_SECONDS
+            const doubleClick = timeSincePreviousClick >= MIN_DOUBLE_CLICK_SECONDS
+                && timeSincePreviousClick <= DOUBLE_CLICK_SECONDS
                 && distanceSquared <= DOUBLE_CLICK_DISTANCE * DOUBLE_CLICK_DISTANCE;
             if (doubleClick) {
                 lastClickTime = -100;
@@ -186,11 +204,13 @@ function processEvents() {
         }
     }
 }
-
 function stepA(dt) {
     if (armed) {
         if (!input.cursorLeftDown) {
             releaseGrab();
+            // The cursor may have been released outside the sprite (no cursorUp callback).
+            // Disallow treating any stale click event as a new physical press.
+            pointerPressed = false;
         } else {
             const cursor = input.cursorWorldPosition;
             if (cursor) {
@@ -303,8 +323,18 @@ export function init() {
     const saved = localStorage.get(STORAGE_KEY);
     if (saved && (saved.mode === 'A' || saved.mode === 'B')) {
         mode = saved.mode;
-        if (typeof saved.x === 'number' && isFinite(saved.x)) x = saved.x;
-        if (typeof saved.y === 'number' && isFinite(saved.y)) y = saved.y;
+        const canvas = bounds();
+        // Migrate saved positions from the previous 1000x1000 scene.
+        const oldWidth = typeof saved.width === 'number' && saved.width > 200 ? saved.width : 1000;
+        const oldHeight = typeof saved.height === 'number' && saved.height > 200 ? saved.height : 1000;
+        if (typeof saved.x === 'number' && isFinite(saved.x)) {
+            x = HALF_SIZE + (saved.x - HALF_SIZE) / (oldWidth - HALF_SIZE * 2)
+                * (canvas.width - HALF_SIZE * 2);
+        }
+        if (typeof saved.y === 'number' && isFinite(saved.y)) {
+            y = HALF_SIZE + (saved.y - HALF_SIZE) / (oldHeight - HALF_SIZE * 2)
+                * (canvas.height - HALF_SIZE * 2);
+        }
     }
     stayOnScreen();
     if (mode === 'B') {
@@ -348,6 +378,8 @@ export function mediaPlaybackChanged(event) {
     if (playing) {
         if (mode === 'B') setMode('A');
         releaseGrab();
+        pointerPressed = false;
+        clickReady = false;
         lastClickTime = -100;
         setIdle(false);
         persist();
