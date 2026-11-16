@@ -1,237 +1,209 @@
 {
-	"camera" : 
-	{
-		"center" : "0.00000 0.00000 -1.00000",
-		"eye" : "0.00000 0.00000 0.00000",
-		"up" : "0.00000 1.00000 0.00000"
-	},
-	"general" : 
-	{
-		"ambientcolor" : "0.30000 0.30000 0.30000",
-		"bloom" : false,
-		"bloomhdrfeather" : 0.1,
-		"bloomhdriterations" : 8,
-		"bloomhdrscatter" : 1.619,
-		"bloomhdrstrength" : 2.0,
-		"bloomhdrthreshold" : 1.0,
-		"bloomstrength" : 2.0,
-		"bloomthreshold" : 0.64999998,
-		"bloomtint" : "1.00000 1.00000 1.00000",
-		"camerafade" : true,
-		"cameraparallax" : false,
-		"cameraparallaxamount" : 0.5,
-		"cameraparallaxdelay" : 0.1,
-		"cameraparallaxmouseinfluence" : 0.5,
-		"camerapreview" : true,
-		"camerashake" : false,
-		"camerashakeamplitude" : 0.5,
-		"camerashakeroughness" : 1.0,
-		"camerashakespeed" : 3.0,
-		"clearcolor" : "0.70000 0.70000 0.70000",
-		"clearenabled" : true,
-		"farz" : 10000.0,
-		"fov" : 50.0,
-		"gravitydirection" : "0.00000 -1.00000 0.00000",
-		"gravitystrength" : 1.0,
-		"hdr" : false,
-		"nearz" : 0.0099999998,
-		"orthogonalprojection" : 
-		{
-			"height" : 1080,
-			"width" : 1920
-		},
-		"perspectiveoverridefov" : 90.0,
-		"skylightcolor" : "0.30000 0.30000 0.30000",
-		"winddirection" : "0.70700 0.70700 0.00000",
-		"windenabled" : false,
-		"windstrength" : 1.0,
-		"zoom" : 1.0
-	},
-	"objects" : 
-	[
-		{
-			"disablepropagation" : true,
-			"id" : 64,
-			"image" : "models/aemeath.json",
-			"name" : "aemeath",
-			"origin" : 
-			{
-				"script" : "'use strict';\n\n// Aemeath desktop companion. Bound to aemeath's Origin property.\n// The remaining image layers forward click events through shared.aemeathEvents.\nconst NAMES = ['aemeath','drag','idle1','idle2','idle3','idle4','move',\n    'screen1','screen2','screen3','screen4','screen5','screen6','screen7'];\nconst IDLES = ['idle1','idle2','idle3','idle4'];\nconst SCREENS = ['screen1','screen2','screen3','screen4','screen5','screen6','screen7'];\nconst STORAGE_KEY = 'aemeath.companion.v1';\nconst HALF_SIZE = 100;\nconst SPEED = 130;\nconst DRAG_THRESHOLD = 7;\n// Windows defaults to a 500ms double-click interval. Allow small cursor drift\n// in canvas coordinates (especially when wallpaper scaling differs from desktop pixels).\nconst DOUBLE_CLICK_SECONDS = 0.5;\nconst DOUBLE_CLICK_DISTANCE = 24;\n\nlet layers = {};\nlet x = 960, y = 540, facing = 1;\nlet mode = 'A', action = 'idle';\nlet idleName = 'idle1', screenName = 'screen1';\nlet musicPlaying = false;\nlet falling = false, fallSpeed = 0;\nlet target = null;\nlet actionDelay = 3;\nlet screenDelay = 20, screenPlayLeft = 0;\nlet armed = false, dragging = false, dragged = false;\nlet grabX = 0, grabY = 0, pressX = 0, pressY = 0;\nlet suppressClickUntil = 0;\n// A continuous burst of 3+ physical clicks is NOT a double-click.\n// We defer A/B switching until 500ms after the second click to reject bursts.\nlet clickBurst = 0, burstLastTime = -100, burstX = 0, burstY = 0;\nlet burstMode = 'A';\n// Only a full physical down/up sequence may issue ONE click.\n// Separate callback scripts can report duplicate cursorClick for the same release.\nlet pointerPressed = false;\nlet pointerDownX = 0, pointerDownY = 0, pointerDownTime = -100;\nlet elapsed = 0, saveDelay = 5;\n\nfunction random(min, max) {\n    return min + Math.random() * (max - min);\n}\n\nfunction chooseOther(names, oldName) {\n    const choices = names.filter(function (name) { return name !== oldName; });\n    return choices[Math.floor(Math.random() * choices.length)];\n}\n\nfunction bounds() {\n    const size = engine.canvasSize;\n    return {\n        width: Math.max(200, size.x),\n        height: Math.max(200, size.y)\n    };\n}\n\nfunction clamp(value, min, max) {\n    return Math.max(min, Math.min(max, value));\n}\n\nfunction stayOnScreen() {\n    const size = bounds();\n    x = clamp(x, HALF_SIZE, size.width - HALF_SIZE);\n    y = clamp(y, HALF_SIZE, size.height - HALF_SIZE);\n}\n\nfunction persist() {\n    const size = bounds();\n    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y, width: size.width, height: size.height });\n}\n\nfunction setIdle(change) {\n    action = 'idle';\n    target = null;\n    if (change) idleName = chooseOther(IDLES, idleName);\n    actionDelay = random(2.5, 6);\n}\n\nfunction beginWalk() {\n    const size = bounds();\n    const cursor = input.cursorWorldPosition;\n    let tx = random(HALF_SIZE, size.width - HALF_SIZE);\n    let ty = random(HALF_SIZE, size.height - HALF_SIZE);\n\n    // Sometimes follow a nearby cursor, otherwise roam freely in both axes.\n    if (cursor && Math.random() < 0.25) {\n        const dx = cursor.x - x, dy = cursor.y - y;\n        if (dx * dx + dy * dy < 260 * 260) {\n            tx = clamp(cursor.x, HALF_SIZE, size.width - HALF_SIZE);\n            ty = clamp(cursor.y, HALF_SIZE, size.height - HALF_SIZE);\n        }\n    }\n    if (Math.abs(tx - x) < 15 && Math.abs(ty - y) < 15) {\n        setIdle(true);\n        return;\n    }\n    target = { x: tx, y: ty };\n    action = 'move';\n}\n\nfunction changeScreen() {\n    screenName = chooseOther(SCREENS, screenName);\n    screenDelay = random(10, 30);\n    const layer = layers[screenName];\n    if (!layer) return;\n    const animation = layer.getTextureAnimation();\n    if (animation) {\n        animation.stop();\n        animation.setFrame(0);\n        animation.play();\n        screenPlayLeft = animation.duration;\n    } else {\n        screenPlayLeft = 0.96;\n    }\n}\n\nfunction setMode(next) {\n    if (musicPlaying && next === 'B') return;\n    if (next === mode) return;\n    mode = next;\n    armed = false;\n    dragging = false;\n    dragged = false;\n    pointerPressed = false;\n    resetClickSequence();\n    target = null;\n    if (mode === 'B') {\n        falling = true;\n        fallSpeed = 0;\n        action = 'idle';\n        changeScreen();\n    } else {\n        falling = false;\n        setIdle(true);\n    }\n    persist();\n}\n\nfunction releaseGrab() {\n    if (!armed) return;\n    if (dragging) {\n        dragged = true;\n        suppressClickUntil = elapsed + 0.25;\n        stayOnScreen();\n        // Pick a different idle animation than the one shown before dragging.\n        setIdle(true);\n        actionDelay = random(2.5, 4);\n        persist();\n    }\n    armed = false;\n    dragging = false;\n}\n\nfunction singleClick() {\n    if (musicPlaying) return;\n    if (mode === 'B') {\n        changeScreen();\n    } else {\n        setIdle(true);\n    }\n}\n\n// Start a fresh sequence only after a pause or a meaningful cursor movement.\n// Subsequent 3rd/4th clicks inside the same sequence cancel the A/B toggle.\nfunction resetClickSequence() {\n    clickBurst = 0;\n    burstLastTime = -100;\n    burstX = 0;\n    burstY = 0;\n}\n\nfunction registerPhysicalClick(ev) {\n    const samePlace = Math.abs(ev.x - burstX) <= DOUBLE_CLICK_DISTANCE\n        && Math.abs(ev.y - burstY) <= DOUBLE_CLICK_DISTANCE;\n    const continues = clickBurst > 0 && mode === burstMode\n        && elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS && samePlace;\n    if (!continues) {\n        clickBurst = 1;\n        burstMode = mode;\n    } else {\n        clickBurst += 1;\n    }\n    burstLastTime = elapsed;\n    burstX = ev.x;\n    burstY = ev.y;\n    // Preserve immediate single-click idle / screen animation reactions.\n    singleClick();\n}\n\nfunction finishClickSequence() {\n    if (clickBurst === 0 || pointerPressed) return;\n    if (elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS) return;\n    const exactlyTwo = clickBurst === 2;\n    resetClickSequence();\n    if (exactlyTwo && !musicPlaying) setMode(mode === 'A' ? 'B' : 'A');\n}\n\nfunction processEvents() {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    const events = shared.aemeathEvents.splice(0);\n    for (let i = 0; i < events.length; i++) {\n        const ev = events[i];\n        if (ev.type === 'down') {\n            if (pointerPressed) {\n                // Duplicate down callbacks from overlapping layers can arrive on the\n                // same frame. If a previous press had no up (cursor left the layer),\n                // let a later physical press recover from that missing event.\n                if (elapsed - pointerDownTime <= 0.03) continue;\n                releaseGrab();\n                resetClickSequence();\n            }\n            pointerPressed = true;\n            pointerDownTime = elapsed;\n            pointerDownX = ev.x;\n            pointerDownY = ev.y;\n            if (mode === 'A') {\n                armed = true;\n                dragging = false;\n                dragged = false;\n                pressX = ev.x;\n                pressY = ev.y;\n                grabX = x - ev.x;\n                grabY = y - ev.y;\n                target = null;\n                action = 'idle';\n            }\n        } else if (ev.type === 'up') {\n            if (!pointerPressed) continue;\n            pointerPressed = false;\n            // CursorUp is emitted when released over a solid layer. CursorClick\n            // is an additional derived callback and may be absent or duplicated\n            // when the visible GIF layer changes between two clicks.\n            const moveX = ev.x - pointerDownX, moveY = ev.y - pointerDownY;\n            const moved = moveX * moveX + moveY * moveY >\n                DRAG_THRESHOLD * DRAG_THRESHOLD;\n            const wasDrag = dragging || dragged || moved;\n            releaseGrab();\n            if (wasDrag || elapsed < suppressClickUntil) {\n                dragged = false;\n                resetClickSequence();\n                continue;\n            }\n            registerPhysicalClick(ev);\n        }\n        // Deliberately ignore 'click': it is derived from the same down/up\n        // input pair and must not increment the physical click count again.\n    }\n}\n\nfunction stepA(dt) {\n    if (armed) {\n        if (!input.cursorLeftDown) {\n            releaseGrab();\n            // A cursorUp event may arrive during the next frame; do not clear\n            // pointerPressed here or that release would be discarded. A future\n            // genuine cursorDown can recover if no cursorUp arrives at all.\n        } else {\n            const cursor = input.cursorWorldPosition;\n            if (cursor) {\n                const dx = cursor.x - pressX, dy = cursor.y - pressY;\n                if (dragging || dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) {\n                    const oldX = x;\n                    dragging = true;\n                    action = 'drag';\n                    x = cursor.x + grabX;\n                    y = cursor.y + grabY;\n                    stayOnScreen();\n                    if (Math.abs(x - oldX) > 0.1) facing = x > oldX ? 1 : -1;\n                }\n            }\n            return;\n        }\n    }\n    if (musicPlaying) return;\n    if (action === 'move' && target) {\n        const dx = target.x - x, dy = target.y - y;\n        const distance = Math.sqrt(dx * dx + dy * dy);\n        const step = SPEED * dt;\n        if (distance <= step || distance < 0.5) {\n            x = target.x;\n            y = target.y;\n            setIdle(true);\n        } else {\n            x += dx / distance * step;\n            y += dy / distance * step;\n            if (Math.abs(dx) > 0.1) facing = dx > 0 ? 1 : -1;\n        }\n    } else {\n        actionDelay -= dt;\n        if (actionDelay <= 0) {\n            if (Math.random() < 0.7) beginWalk();\n            else setIdle(true);\n        }\n    }\n    stayOnScreen();\n}\n\nfunction stepB(dt) {\n    if (falling) {\n        fallSpeed += 1400 * dt;\n        y -= fallSpeed * dt;\n        if (y <= HALF_SIZE) {\n            y = HALF_SIZE;\n            falling = false;\n            fallSpeed = 0;\n            persist();\n        }\n    } else {\n        y = HALF_SIZE;\n    }\n    screenDelay -= dt;\n    if (screenPlayLeft > 0) {\n        screenPlayLeft -= dt;\n        if (screenPlayLeft <= 0) {\n            const animation = layers[screenName].getTextureAnimation();\n            if (animation) {\n                animation.setFrame(0);\n                animation.pause();\n            }\n        }\n    }\n    if (!falling && screenDelay <= 0) changeScreen();\n}\n\nfunction render() {\n    const active = musicPlaying ? 'aemeath'\n        : mode === 'B' ? screenName\n        : dragging ? 'drag'\n        : action === 'move' ? 'move' : idleName;\n\n    for (let i = 0; i < NAMES.length; i++) {\n        const name = NAMES[i];\n        const layer = layers[name];\n        if (!layer) continue;\n        const shouldBeVisible = name === active;\n        if (layer.visible !== shouldBeVisible) layer.visible = shouldBeVisible;\n\n        // The script is bound to aemeath.origin, so return its position from update.\n        if (name !== 'aemeath') {\n            const origin = layer.origin;\n            if (Math.abs(origin.x - x) > 0.01 || Math.abs(origin.y - y) > 0.01) {\n                layer.origin = new Vec3(x, y, 0);\n            }\n        }\n        const desiredX = name === 'aemeath' ? 0.2 :\n            (name.indexOf('screen') === 0 ? 1 : facing);\n        const desiredY = name === 'aemeath' ? 0.2 : 1;\n        const currentScale = layer.scale;\n        if (Math.abs(currentScale.x - desiredX) > 0.001 ||\n            Math.abs(currentScale.y - desiredY) > 0.001) {\n            layer.scale = new Vec3(desiredX, desiredY, 1);\n        }\n    }\n}\n\nfunction queue(type, ev) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({ type: type, x: ev.worldPosition.x, y: ev.worldPosition.y });\n}\n\nexport function init() {\n    for (let i = 0; i < NAMES.length; i++) {\n        layers[NAMES[i]] = thisScene.getLayer(NAMES[i]);\n        if (layers[NAMES[i]]) layers[NAMES[i]].solid = true;\n    }\n    const saved = localStorage.get(STORAGE_KEY);\n    if (saved && (saved.mode === 'A' || saved.mode === 'B')) {\n        mode = saved.mode;\n        const canvas = bounds();\n        // Migrate saved positions from the previous 1000x1000 scene.\n        const oldWidth = typeof saved.width === 'number' && saved.width > 200 ? saved.width : 1000;\n        const oldHeight = typeof saved.height === 'number' && saved.height > 200 ? saved.height : 1000;\n        if (typeof saved.x === 'number' && isFinite(saved.x)) {\n            x = HALF_SIZE + (saved.x - HALF_SIZE) / (oldWidth - HALF_SIZE * 2)\n                * (canvas.width - HALF_SIZE * 2);\n        }\n        if (typeof saved.y === 'number' && isFinite(saved.y)) {\n            y = HALF_SIZE + (saved.y - HALF_SIZE) / (oldHeight - HALF_SIZE * 2)\n                * (canvas.height - HALF_SIZE * 2);\n        }\n    }\n    stayOnScreen();\n    if (mode === 'B') {\n        y = HALF_SIZE;\n        const animation = layers[screenName].getTextureAnimation();\n        if (animation) {\n            animation.setFrame(0);\n            animation.pause();\n        }\n        screenDelay = random(10, 30);\n    }\n    render();\n}\n\nexport function update(value) {\n    const dt = clamp(engine.frametime, 0, 0.05);\n    elapsed += dt;\n    processEvents();\n    finishClickSequence();\n    if (mode === 'A') stepA(dt);\n    else stepB(dt);\n    saveDelay -= dt;\n    if (saveDelay <= 0) {\n        persist();\n        saveDelay = 5;\n    }\n    render();\n    value.x = x;\n    value.y = y;\n    value.z = 0;\n    return value;\n}\n\nexport function destroy() {\n    persist();\n}\n\nexport function mediaPlaybackChanged(event) {\n    const playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;\n    if (playing === musicPlaying) return;\n    musicPlaying = playing;\n    if (playing) {\n        if (mode === 'B') setMode('A');\n        releaseGrab();\n        pointerPressed = false;\n        resetClickSequence();\n        setIdle(false);\n        persist();\n    } else {\n        // Media ends or pauses: remain in A and resume regular behavior.\n        resetClickSequence();\n        setIdle(true);\n        persist();\n    }\n    render();\n}\n\nexport function mediaStatusChanged(event) {\n    if (!event.enabled && musicPlaying) {\n        musicPlaying = false;\n        setIdle(true);\n        persist();\n        render();\n    }\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : "960.00000 540.00000 0.00000"
-			},
-			"scale" : "0.20000 0.20000 1.00000",
-			"size" : "1000.00000 1000.00000",
-			"visible" : false
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 22,
-			"image" : "models/drag.json",
-			"name" : "drag",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 31,
-			"image" : "models/idle1.json",
-			"name" : "idle1",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 193.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : true
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 25,
-			"image" : "models/idle2.json",
-			"name" : "idle2",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 28,
-			"image" : "models/idle3.json",
-			"name" : "idle3",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 34,
-			"image" : "models/idle4.json",
-			"name" : "idle4",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 37,
-			"image" : "models/move.json",
-			"name" : "move",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 40,
-			"image" : "models/screen1.json",
-			"name" : "screen1",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 43,
-			"image" : "models/screen2.json",
-			"name" : "screen2",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 46,
-			"image" : "models/screen3.json",
-			"name" : "screen3",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 49,
-			"image" : "models/screen4.json",
-			"name" : "screen4",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 52,
-			"image" : "models/screen5.json",
-			"name" : "screen5",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 55,
-			"image" : "models/screen6.json",
-			"name" : "screen6",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		},
-		{
-			"disablepropagation" : true,
-			"id" : 58,
-			"image" : "models/screen7.json",
-			"name" : "screen7",
-			"origin" : "960.00000 540.00000 0.00000",
-			"size" : "200.00000 200.00000",
-			"visible" : 
-			{
-				"script" : "'use strict';\n\n// Visible sprite input bridge. The controller runs on aemeath.origin.\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    shared.aemeathEvents.push({\n        type: type,\n        x: event.worldPosition.x,\n        y: event.worldPosition.y\n    });\n}\n\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) { queue('click', event); }\n",
-				"value" : false
-			}
-		}
-	],
-	"version" : 5
+  "camera": {
+    "center": "0.00000 0.00000 -1.00000",
+    "eye": "0.00000 0.00000 0.00000",
+    "up": "0.00000 1.00000 0.00000"
+  },
+  "general": {
+    "ambientcolor": "0.30000 0.30000 0.30000",
+    "bloom": false,
+    "bloomhdrfeather": 0.1,
+    "bloomhdriterations": 8,
+    "bloomhdrscatter": 1.619,
+    "bloomhdrstrength": 2,
+    "bloomhdrthreshold": 1,
+    "bloomstrength": 2,
+    "bloomthreshold": 0.64999998,
+    "bloomtint": "1.00000 1.00000 1.00000",
+    "camerafade": true,
+    "cameraparallax": false,
+    "cameraparallaxamount": 0.5,
+    "cameraparallaxdelay": 0.1,
+    "cameraparallaxmouseinfluence": 0.5,
+    "camerapreview": true,
+    "camerashake": false,
+    "camerashakeamplitude": 0.5,
+    "camerashakeroughness": 1,
+    "camerashakespeed": 3,
+    "clearcolor": "0.70000 0.70000 0.70000",
+    "clearenabled": true,
+    "farz": 10000,
+    "fov": 50,
+    "gravitydirection": "0.00000 -1.00000 0.00000",
+    "gravitystrength": 1,
+    "hdr": false,
+    "nearz": 0.0099999998,
+    "orthogonalprojection": {
+      "height": 1080,
+      "width": 1920
+    },
+    "perspectiveoverridefov": 90,
+    "skylightcolor": "0.30000 0.30000 0.30000",
+    "winddirection": "0.70700 0.70700 0.00000",
+    "windenabled": false,
+    "windstrength": 1,
+    "zoom": 1
+  },
+  "objects": [
+    {
+      "id": 65,
+      "name": "companion_hitbox",
+      "image": "models/util/solidlayer.json",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "scale": "1.00000 1.00000 1.00000",
+      "alpha": 0,
+      "solid": true,
+      "visible": {
+        "script": "'use strict';\n\n// The stable, transparent 200x200 Solid Placeholder is the ONLY mouse target.\nconst DEBUG_INPUT = true;\nfunction queue(type, event) {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    const p = event.worldPosition, at = Date.now();\n    shared.aemeathEvents.push({type: type, x: p.x, y: p.y, at: at});\n    if (DEBUG_INPUT) console.log('[Aemeath hitbox] ' + type\n        + ' t=' + at + ' x=' + Math.round(p.x) + ' y=' + Math.round(p.y));\n}\nexport function cursorDown(event) { queue('down', event); }\nexport function cursorUp(event) { queue('up', event); }\nexport function cursorClick(event) {\n    if (DEBUG_INPUT) console.log('[Aemeath hitbox] derived click (ignored)');\n}\n",
+        "value": true
+      },
+      "disablepropagation": true
+    },
+    {
+      "disablepropagation": true,
+      "id": 64,
+      "image": "models/aemeath.json",
+      "name": "aemeath",
+      "origin": {
+        "script": "'use strict';\n\n// Aemeath desktop companion. Bound to aemeath's Origin property.\n// The remaining image layers forward click events through shared.aemeathEvents.\nconst NAMES = ['aemeath','drag','idle1','idle2','idle3','idle4','move',\n    'screen1','screen2','screen3','screen4','screen5','screen6','screen7'];\nconst IDLES = ['idle1','idle2','idle3','idle4'];\nconst SCREENS = ['screen1','screen2','screen3','screen4','screen5','screen6','screen7'];\nconst STORAGE_KEY = 'aemeath.companion.v1';\nconst HALF_SIZE = 100;\nconst SPEED = 130;\nconst DRAG_THRESHOLD = 7;\n// Windows defaults to a 500ms double-click interval. Allow small cursor drift\n// in canvas coordinates (especially when wallpaper scaling differs from desktop pixels).\nconst DOUBLE_CLICK_SECONDS = 0.5;\nconst DOUBLE_CLICK_DISTANCE = 24;\nconst DOUBLE_CLICK_CONFIRM_MS = 180;\nconst DEBUG_INPUT = true;\n\nlet layers = {};\nlet hitbox = null;\nlet x = 960, y = 540, facing = 1;\nlet mode = 'A', action = 'idle';\nlet idleName = 'idle1', screenName = 'screen1';\nlet musicPlaying = false;\nlet falling = false, fallSpeed = 0;\nlet target = null;\nlet actionDelay = 3;\nlet screenDelay = 20, screenPlayLeft = 0;\nlet armed = false, dragging = false, dragged = false;\nlet grabX = 0, grabY = 0, pressX = 0, pressY = 0;\nlet suppressClickUntil = 0;\nlet clickBurst = 0, burstLastTime = -1, burstX = 0, burstY = 0;\nlet burstMode = 'A';\nlet pointerPressed = false;\nlet pointerDownX = 0, pointerDownY = 0, pointerDownTime = -1;\nlet elapsed = 0, saveDelay = 5;\n\nfunction random(min, max) {\n    return min + Math.random() * (max - min);\n}\n\nfunction chooseOther(names, oldName) {\n    const choices = names.filter(function (name) { return name !== oldName; });\n    return choices[Math.floor(Math.random() * choices.length)];\n}\n\nfunction bounds() {\n    const size = engine.canvasSize;\n    return {\n        width: Math.max(200, size.x),\n        height: Math.max(200, size.y)\n    };\n}\n\nfunction clamp(value, min, max) {\n    return Math.max(min, Math.min(max, value));\n}\n\nfunction stayOnScreen() {\n    const size = bounds();\n    x = clamp(x, HALF_SIZE, size.width - HALF_SIZE);\n    y = clamp(y, HALF_SIZE, size.height - HALF_SIZE);\n}\n\nfunction persist() {\n    const size = bounds();\n    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y, width: size.width, height: size.height });\n}\n\nfunction setIdle(change) {\n    action = 'idle';\n    target = null;\n    if (change) idleName = chooseOther(IDLES, idleName);\n    actionDelay = random(2.5, 6);\n}\n\nfunction beginWalk() {\n    const size = bounds();\n    const cursor = input.cursorWorldPosition;\n    let tx = random(HALF_SIZE, size.width - HALF_SIZE);\n    let ty = random(HALF_SIZE, size.height - HALF_SIZE);\n\n    // Sometimes follow a nearby cursor, otherwise roam freely in both axes.\n    if (cursor && Math.random() < 0.25) {\n        const dx = cursor.x - x, dy = cursor.y - y;\n        if (dx * dx + dy * dy < 260 * 260) {\n            tx = clamp(cursor.x, HALF_SIZE, size.width - HALF_SIZE);\n            ty = clamp(cursor.y, HALF_SIZE, size.height - HALF_SIZE);\n        }\n    }\n    if (Math.abs(tx - x) < 15 && Math.abs(ty - y) < 15) {\n        setIdle(true);\n        return;\n    }\n    target = { x: tx, y: ty };\n    action = 'move';\n}\n\nfunction changeScreen() {\n    screenName = chooseOther(SCREENS, screenName);\n    screenDelay = random(10, 30);\n    const layer = layers[screenName];\n    if (!layer) return;\n    const animation = layer.getTextureAnimation();\n    if (animation) {\n        animation.stop();\n        animation.setFrame(0);\n        animation.play();\n        screenPlayLeft = animation.duration;\n    } else {\n        screenPlayLeft = 0.96;\n    }\n}\n\nfunction setMode(next) {\n    if (musicPlaying && next === 'B') return;\n    if (next === mode) return;\n    mode = next;\n    armed = false;\n    dragging = false;\n    dragged = false;\n    pointerPressed = false;\n    resetClickSequence();\n    target = null;\n    if (DEBUG_INPUT) console.log('[Aemeath mode] now ' + mode);\n    if (mode === 'B') {\n        falling = true;\n        fallSpeed = 0;\n        action = 'idle';\n        changeScreen();\n    } else {\n        falling = false;\n        setIdle(true);\n    }\n    persist();\n}\n\nfunction releaseGrab() {\n    if (!armed) return;\n    if (dragging) {\n        dragged = true;\n        suppressClickUntil = elapsed + 0.25;\n        stayOnScreen();\n        // Pick a different idle animation than the one shown before dragging.\n        setIdle(true);\n        actionDelay = random(2.5, 4);\n        persist();\n    }\n    armed = false;\n    dragging = false;\n}\n\nfunction singleClick() {\n    if (musicPlaying) return;\n    if (mode === 'B') {\n        changeScreen();\n    } else {\n        setIdle(true);\n    }\n}\n\n// Start a fresh sequence only after a pause or a meaningful cursor movement.\n// Subsequent 3rd/4th clicks inside the same sequence cancel the A/B toggle.\nfunction resetClickSequence() {\n    clickBurst = 0;\n    burstLastTime = -1;\n    burstX = 0;\n    burstY = 0;\n}\n\nfunction registerPhysicalClick(ev) {\n    const now = typeof ev.at === 'number' ? ev.at : Date.now();\n    const samePlace = Math.abs(ev.x - burstX) <= DOUBLE_CLICK_DISTANCE\n        && Math.abs(ev.y - burstY) <= DOUBLE_CLICK_DISTANCE;\n    const continues = clickBurst > 0 && mode === burstMode\n        && now - burstLastTime >= 0 && now - burstLastTime <= DOUBLE_CLICK_SECONDS * 1000\n        && samePlace;\n    if (!continues) {\n        clickBurst = 1;\n        burstMode = mode;\n    } else {\n        clickBurst += 1;\n    }\n    burstLastTime = now;\n    burstX = ev.x;\n    burstY = ev.y;\n    if (DEBUG_INPUT) console.log('[Aemeath click] count=' + clickBurst + ' mode=' + mode);\n    singleClick();\n}\n\nfunction finishClickSequence() {\n    if (clickBurst === 0 || pointerPressed) return;\n    const sinceLastClick = Date.now() - burstLastTime;\n    // Confirm after a short grace period rather than a second full 500ms.\n    if (clickBurst === 2 && sinceLastClick >= DOUBLE_CLICK_CONFIRM_MS) {\n        resetClickSequence();\n        if (!musicPlaying) setMode(mode === 'A' ? 'B' : 'A');\n        return;\n    }\n    if (sinceLastClick > DOUBLE_CLICK_SECONDS * 1000) resetClickSequence();\n}\n\n// Only the permanent invisible companion_hitbox forwards pointer events.\nfunction processEvents() {\n    if (!shared.aemeathEvents) shared.aemeathEvents = [];\n    const events = shared.aemeathEvents.splice(0);\n    for (let i = 0; i < events.length; i++) {\n        const ev = events[i];\n        if (ev.type === 'down') {\n            if (pointerPressed) {\n                if (ev.at - pointerDownTime < 35) continue;\n                releaseGrab();\n                resetClickSequence();\n            }\n            pointerPressed = true;\n            pointerDownTime = ev.at;\n            pointerDownX = ev.x;\n            pointerDownY = ev.y;\n            if (mode === 'A') {\n                armed = true;\n                dragging = false;\n                dragged = false;\n                pressX = ev.x;\n                pressY = ev.y;\n                grabX = x - ev.x;\n                grabY = y - ev.y;\n                target = null;\n                action = 'idle';\n            }\n        } else if (ev.type === 'up') {\n            if (!pointerPressed) continue;\n            pointerPressed = false;\n            const dx = ev.x - pointerDownX, dy = ev.y - pointerDownY;\n            const moved = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;\n            const wasDrag = dragging || dragged || moved;\n            releaseGrab();\n            if (wasDrag || elapsed < suppressClickUntil) {\n                dragged = false;\n                resetClickSequence();\n                continue;\n            }\n            registerPhysicalClick(ev);\n        }\n        // cursorClick is a derived event and is never counted again.\n    }\n}\n\nfunction stepA(dt) {\n    if (armed) {\n        if (!input.cursorLeftDown) {\n            releaseGrab();\n            // A cursorUp event may arrive during the next frame; do not clear\n            // pointerPressed here or that release would be discarded. A future\n            // genuine cursorDown can recover if no cursorUp arrives at all.\n        } else {\n            const cursor = input.cursorWorldPosition;\n            if (cursor) {\n                const dx = cursor.x - pressX, dy = cursor.y - pressY;\n                if (dragging || dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) {\n                    const oldX = x;\n                    dragging = true;\n                    action = 'drag';\n                    x = cursor.x + grabX;\n                    y = cursor.y + grabY;\n                    stayOnScreen();\n                    if (Math.abs(x - oldX) > 0.1) facing = x > oldX ? 1 : -1;\n                }\n            }\n            return;\n        }\n    }\n    if (musicPlaying) return;\n    if (action === 'move' && target) {\n        const dx = target.x - x, dy = target.y - y;\n        const distance = Math.sqrt(dx * dx + dy * dy);\n        const step = SPEED * dt;\n        if (distance <= step || distance < 0.5) {\n            x = target.x;\n            y = target.y;\n            setIdle(true);\n        } else {\n            x += dx / distance * step;\n            y += dy / distance * step;\n            if (Math.abs(dx) > 0.1) facing = dx > 0 ? 1 : -1;\n        }\n    } else {\n        actionDelay -= dt;\n        if (actionDelay <= 0) {\n            if (Math.random() < 0.7) beginWalk();\n            else setIdle(true);\n        }\n    }\n    stayOnScreen();\n}\n\nfunction stepB(dt) {\n    if (falling) {\n        fallSpeed += 1400 * dt;\n        y -= fallSpeed * dt;\n        if (y <= HALF_SIZE) {\n            y = HALF_SIZE;\n            falling = false;\n            fallSpeed = 0;\n            persist();\n        }\n    } else {\n        y = HALF_SIZE;\n    }\n    screenDelay -= dt;\n    if (screenPlayLeft > 0) {\n        screenPlayLeft -= dt;\n        if (screenPlayLeft <= 0) {\n            const animation = layers[screenName].getTextureAnimation();\n            if (animation) {\n                animation.setFrame(0);\n                animation.pause();\n            }\n        }\n    }\n    if (!falling && screenDelay <= 0) changeScreen();\n}\n\nfunction render() {\n    const active = musicPlaying ? 'aemeath'\n        : mode === 'B' ? screenName\n        : dragging ? 'drag'\n        : action === 'move' ? 'move' : idleName;\n\n    for (let i = 0; i < NAMES.length; i++) {\n        const name = NAMES[i];\n        const layer = layers[name];\n        if (!layer) continue;\n        const shouldBeVisible = name === active;\n        if (layer.visible !== shouldBeVisible) layer.visible = shouldBeVisible;\n\n        // The script is bound to aemeath.origin, so return its position from update.\n        if (name !== 'aemeath') {\n            const origin = layer.origin;\n            if (Math.abs(origin.x - x) > 0.01 || Math.abs(origin.y - y) > 0.01) {\n                layer.origin = new Vec3(x, y, 0);\n            }\n        }\n        const desiredX = name === 'aemeath' ? 0.2 :\n            (name.indexOf('screen') === 0 ? 1 : facing);\n        const desiredY = name === 'aemeath' ? 0.2 : 1;\n        const currentScale = layer.scale;\n        if (Math.abs(currentScale.x - desiredX) > 0.001 ||\n            Math.abs(currentScale.y - desiredY) > 0.001) {\n            layer.scale = new Vec3(desiredX, desiredY, 1);\n        }\n    }\n    if (hitbox) {\n        hitbox.visible = true;\n        const p = hitbox.origin;\n        if (Math.abs(p.x - x) > 0.01 || Math.abs(p.y - y) > 0.01)\n            hitbox.origin = new Vec3(x, y, 0);\n    }\n}\n\nexport function init() {\n    for (let i = 0; i < NAMES.length; i++) {\n        layers[NAMES[i]] = thisScene.getLayer(NAMES[i]);\n        if (layers[NAMES[i]]) layers[NAMES[i]].solid = false;\n    }\n    hitbox = thisScene.getLayer('companion_hitbox');\n    if (hitbox) {\n        hitbox.solid = true;\n        hitbox.visible = true;\n    } else {\n        console.log('[Aemeath ERROR] companion_hitbox layer is missing');\n    }\n    const saved = localStorage.get(STORAGE_KEY);\n    if (saved && (saved.mode === 'A' || saved.mode === 'B')) {\n        mode = saved.mode;\n        const canvas = bounds();\n        // Migrate saved positions from the previous 1000x1000 scene.\n        const oldWidth = typeof saved.width === 'number' && saved.width > 200 ? saved.width : 1000;\n        const oldHeight = typeof saved.height === 'number' && saved.height > 200 ? saved.height : 1000;\n        if (typeof saved.x === 'number' && isFinite(saved.x)) {\n            x = HALF_SIZE + (saved.x - HALF_SIZE) / (oldWidth - HALF_SIZE * 2)\n                * (canvas.width - HALF_SIZE * 2);\n        }\n        if (typeof saved.y === 'number' && isFinite(saved.y)) {\n            y = HALF_SIZE + (saved.y - HALF_SIZE) / (oldHeight - HALF_SIZE * 2)\n                * (canvas.height - HALF_SIZE * 2);\n        }\n    }\n    stayOnScreen();\n    if (mode === 'B') {\n        y = HALF_SIZE;\n        const animation = layers[screenName].getTextureAnimation();\n        if (animation) {\n            animation.setFrame(0);\n            animation.pause();\n        }\n        screenDelay = random(10, 30);\n    }\n    render();\n}\n\nexport function update(value) {\n    const dt = clamp(engine.frametime, 0, 0.05);\n    elapsed += dt;\n    processEvents();\n    finishClickSequence();\n    if (mode === 'A') stepA(dt);\n    else stepB(dt);\n    saveDelay -= dt;\n    if (saveDelay <= 0) {\n        persist();\n        saveDelay = 5;\n    }\n    render();\n    value.x = x;\n    value.y = y;\n    value.z = 0;\n    return value;\n}\n\nexport function destroy() {\n    persist();\n}\n\nexport function mediaPlaybackChanged(event) {\n    const playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;\n    if (playing === musicPlaying) return;\n    musicPlaying = playing;\n    if (playing) {\n        if (mode === 'B') setMode('A');\n        releaseGrab();\n        pointerPressed = false;\n        resetClickSequence();\n        setIdle(false);\n        persist();\n    } else {\n        // Media ends or pauses: remain in A and resume regular behavior.\n        resetClickSequence();\n        setIdle(true);\n        persist();\n    }\n    render();\n}\n\nexport function mediaStatusChanged(event) {\n    if (!event.enabled && musicPlaying) {\n        musicPlaying = false;\n        setIdle(true);\n        persist();\n        render();\n    }\n}\n\n",
+        "value": "960.00000 540.00000 0.00000"
+      },
+      "scale": "0.20000 0.20000 1.00000",
+      "size": "1000.00000 1000.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 22,
+      "image": "models/drag.json",
+      "name": "drag",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 31,
+      "image": "models/idle1.json",
+      "name": "idle1",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 193.00000",
+      "visible": true,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 25,
+      "image": "models/idle2.json",
+      "name": "idle2",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 28,
+      "image": "models/idle3.json",
+      "name": "idle3",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 34,
+      "image": "models/idle4.json",
+      "name": "idle4",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 37,
+      "image": "models/move.json",
+      "name": "move",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 40,
+      "image": "models/screen1.json",
+      "name": "screen1",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 43,
+      "image": "models/screen2.json",
+      "name": "screen2",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 46,
+      "image": "models/screen3.json",
+      "name": "screen3",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 49,
+      "image": "models/screen4.json",
+      "name": "screen4",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 52,
+      "image": "models/screen5.json",
+      "name": "screen5",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 55,
+      "image": "models/screen6.json",
+      "name": "screen6",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    },
+    {
+      "disablepropagation": true,
+      "id": 58,
+      "image": "models/screen7.json",
+      "name": "screen7",
+      "origin": "960.00000 540.00000 0.00000",
+      "size": "200.00000 200.00000",
+      "visible": false,
+      "solid": false
+    }
+  ],
+  "version": 5
 }

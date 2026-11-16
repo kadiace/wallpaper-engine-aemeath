@@ -14,8 +14,11 @@ const DRAG_THRESHOLD = 7;
 // in canvas coordinates (especially when wallpaper scaling differs from desktop pixels).
 const DOUBLE_CLICK_SECONDS = 0.5;
 const DOUBLE_CLICK_DISTANCE = 24;
+const DOUBLE_CLICK_CONFIRM_MS = 180;
+const DEBUG_INPUT = true;
 
 let layers = {};
+let hitbox = null;
 let x = 960, y = 540, facing = 1;
 let mode = 'A', action = 'idle';
 let idleName = 'idle1', screenName = 'screen1';
@@ -27,14 +30,10 @@ let screenDelay = 20, screenPlayLeft = 0;
 let armed = false, dragging = false, dragged = false;
 let grabX = 0, grabY = 0, pressX = 0, pressY = 0;
 let suppressClickUntil = 0;
-// A continuous burst of 3+ physical clicks is NOT a double-click.
-// We defer A/B switching until 500ms after the second click to reject bursts.
-let clickBurst = 0, burstLastTime = -100, burstX = 0, burstY = 0;
+let clickBurst = 0, burstLastTime = -1, burstX = 0, burstY = 0;
 let burstMode = 'A';
-// Only a full physical down/up sequence may issue ONE click.
-// Separate callback scripts can report duplicate cursorClick for the same release.
 let pointerPressed = false;
-let pointerDownX = 0, pointerDownY = 0, pointerDownTime = -100;
+let pointerDownX = 0, pointerDownY = 0, pointerDownTime = -1;
 let elapsed = 0, saveDelay = 5;
 
 function random(min, max) {
@@ -124,6 +123,7 @@ function setMode(next) {
     pointerPressed = false;
     resetClickSequence();
     target = null;
+    if (DEBUG_INPUT) console.log('[Aemeath mode] now ' + mode);
     if (mode === 'B') {
         falling = true;
         fallSpeed = 0;
@@ -164,37 +164,44 @@ function singleClick() {
 // Subsequent 3rd/4th clicks inside the same sequence cancel the A/B toggle.
 function resetClickSequence() {
     clickBurst = 0;
-    burstLastTime = -100;
+    burstLastTime = -1;
     burstX = 0;
     burstY = 0;
 }
 
 function registerPhysicalClick(ev) {
+    const now = typeof ev.at === 'number' ? ev.at : Date.now();
     const samePlace = Math.abs(ev.x - burstX) <= DOUBLE_CLICK_DISTANCE
         && Math.abs(ev.y - burstY) <= DOUBLE_CLICK_DISTANCE;
     const continues = clickBurst > 0 && mode === burstMode
-        && elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS && samePlace;
+        && now - burstLastTime >= 0 && now - burstLastTime <= DOUBLE_CLICK_SECONDS * 1000
+        && samePlace;
     if (!continues) {
         clickBurst = 1;
         burstMode = mode;
     } else {
         clickBurst += 1;
     }
-    burstLastTime = elapsed;
+    burstLastTime = now;
     burstX = ev.x;
     burstY = ev.y;
-    // Preserve immediate single-click idle / screen animation reactions.
+    if (DEBUG_INPUT) console.log('[Aemeath click] count=' + clickBurst + ' mode=' + mode);
     singleClick();
 }
 
 function finishClickSequence() {
     if (clickBurst === 0 || pointerPressed) return;
-    if (elapsed - burstLastTime <= DOUBLE_CLICK_SECONDS) return;
-    const exactlyTwo = clickBurst === 2;
-    resetClickSequence();
-    if (exactlyTwo && !musicPlaying) setMode(mode === 'A' ? 'B' : 'A');
+    const sinceLastClick = Date.now() - burstLastTime;
+    // Confirm after a short grace period rather than a second full 500ms.
+    if (clickBurst === 2 && sinceLastClick >= DOUBLE_CLICK_CONFIRM_MS) {
+        resetClickSequence();
+        if (!musicPlaying) setMode(mode === 'A' ? 'B' : 'A');
+        return;
+    }
+    if (sinceLastClick > DOUBLE_CLICK_SECONDS * 1000) resetClickSequence();
 }
 
+// Only the permanent invisible companion_hitbox forwards pointer events.
 function processEvents() {
     if (!shared.aemeathEvents) shared.aemeathEvents = [];
     const events = shared.aemeathEvents.splice(0);
@@ -202,15 +209,12 @@ function processEvents() {
         const ev = events[i];
         if (ev.type === 'down') {
             if (pointerPressed) {
-                // Duplicate down callbacks from overlapping layers can arrive on the
-                // same frame. If a previous press had no up (cursor left the layer),
-                // let a later physical press recover from that missing event.
-                if (elapsed - pointerDownTime <= 0.03) continue;
+                if (ev.at - pointerDownTime < 35) continue;
                 releaseGrab();
                 resetClickSequence();
             }
             pointerPressed = true;
-            pointerDownTime = elapsed;
+            pointerDownTime = ev.at;
             pointerDownX = ev.x;
             pointerDownY = ev.y;
             if (mode === 'A') {
@@ -227,12 +231,8 @@ function processEvents() {
         } else if (ev.type === 'up') {
             if (!pointerPressed) continue;
             pointerPressed = false;
-            // CursorUp is emitted when released over a solid layer. CursorClick
-            // is an additional derived callback and may be absent or duplicated
-            // when the visible GIF layer changes between two clicks.
-            const moveX = ev.x - pointerDownX, moveY = ev.y - pointerDownY;
-            const moved = moveX * moveX + moveY * moveY >
-                DRAG_THRESHOLD * DRAG_THRESHOLD;
+            const dx = ev.x - pointerDownX, dy = ev.y - pointerDownY;
+            const moved = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
             const wasDrag = dragging || dragged || moved;
             releaseGrab();
             if (wasDrag || elapsed < suppressClickUntil) {
@@ -242,8 +242,7 @@ function processEvents() {
             }
             registerPhysicalClick(ev);
         }
-        // Deliberately ignore 'click': it is derived from the same down/up
-        // input pair and must not increment the physical click count again.
+        // cursorClick is a derived event and is never counted again.
     }
 }
 
@@ -351,17 +350,25 @@ function render() {
             layer.scale = new Vec3(desiredX, desiredY, 1);
         }
     }
-}
-
-function queue(type, ev) {
-    if (!shared.aemeathEvents) shared.aemeathEvents = [];
-    shared.aemeathEvents.push({ type: type, x: ev.worldPosition.x, y: ev.worldPosition.y });
+    if (hitbox) {
+        hitbox.visible = true;
+        const p = hitbox.origin;
+        if (Math.abs(p.x - x) > 0.01 || Math.abs(p.y - y) > 0.01)
+            hitbox.origin = new Vec3(x, y, 0);
+    }
 }
 
 export function init() {
     for (let i = 0; i < NAMES.length; i++) {
         layers[NAMES[i]] = thisScene.getLayer(NAMES[i]);
-        if (layers[NAMES[i]]) layers[NAMES[i]].solid = true;
+        if (layers[NAMES[i]]) layers[NAMES[i]].solid = false;
+    }
+    hitbox = thisScene.getLayer('companion_hitbox');
+    if (hitbox) {
+        hitbox.solid = true;
+        hitbox.visible = true;
+    } else {
+        console.log('[Aemeath ERROR] companion_hitbox layer is missing');
     }
     const saved = localStorage.get(STORAGE_KEY);
     if (saved && (saved.mode === 'A' || saved.mode === 'B')) {
@@ -444,6 +451,3 @@ export function mediaStatusChanged(event) {
     }
 }
 
-export function cursorDown(event) { queue('down', event); }
-export function cursorUp(event) { queue('up', event); }
-export function cursorClick(event) { queue('click', event); }
