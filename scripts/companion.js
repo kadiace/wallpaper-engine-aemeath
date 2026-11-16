@@ -59,13 +59,15 @@ function clamp(value, min, max) {
 
 function stayOnScreen() {
     const size = bounds();
-    x = clamp(x, HALF_SIZE, size.width - HALF_SIZE);
-    y = clamp(y, HALF_SIZE, size.height - HALF_SIZE);
+    const half = canvasHalfSize();
+    x = clamp(x, half, size.width - half);
+    y = clamp(y, half, size.height - half);
 }
 
 function persist() {
     const size = bounds();
-    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y, width: size.width, height: size.height });
+    localStorage.set(STORAGE_KEY, { mode: mode, x: x, y: y, width: size.width, height: size.height,
+        sizeMultiplier: sizeMultiplier, manualVisual: manualVisual });
 }
 
 function setIdle(change) {
@@ -117,6 +119,8 @@ function setMode(next) {
     if (musicPlaying && next === 'B') return;
     if (next === mode) return;
     mode = next;
+    manualVisual = null;
+    menuOpen = false;
     armed = false;
     dragging = false;
     dragged = false;
@@ -139,6 +143,7 @@ function setMode(next) {
 function releaseGrab() {
     if (!armed) return;
     if (dragging) {
+        manualVisual = null;
         dragged = true;
         suppressClickUntil = elapsed + 0.25;
         stayOnScreen();
@@ -153,6 +158,7 @@ function releaseGrab() {
 
 function singleClick() {
     if (musicPlaying) return;
+    manualVisual = null;
     if (mode === 'B') {
         changeScreen();
     } else {
@@ -270,7 +276,7 @@ function stepA(dt) {
             return;
         }
     }
-    if (musicPlaying) return;
+    if (musicPlaying || menuOpen || manualVisual) return;
     if (action === 'move' && target) {
         const dx = target.x - x, dy = target.y - y;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -298,15 +304,16 @@ function stepB(dt) {
     if (falling) {
         fallSpeed += 1400 * dt;
         y -= fallSpeed * dt;
-        if (y <= HALF_SIZE) {
-            y = HALF_SIZE;
+        if (y <= canvasHalfSize()) {
+            y = canvasHalfSize();
             falling = false;
             fallSpeed = 0;
             persist();
         }
     } else {
-        y = HALF_SIZE;
+        y = canvasHalfSize();
     }
+    if (menuOpen || manualVisual) return;
     screenDelay -= dt;
     if (screenPlayLeft > 0) {
         screenPlayLeft -= dt;
@@ -323,6 +330,7 @@ function stepB(dt) {
 
 function render() {
     const active = musicPlaying ? 'aemeath'
+        : manualVisual ? manualVisual
         : mode === 'B' ? screenName
         : dragging ? 'drag'
         : action === 'move' ? 'move' : idleName;
@@ -341,9 +349,9 @@ function render() {
                 layer.origin = new Vec3(x, y, 0);
             }
         }
-        const desiredX = name === 'aemeath' ? 0.2 :
-            (name.indexOf('screen') === 0 ? 1 : facing);
-        const desiredY = name === 'aemeath' ? 0.2 : 1;
+        const desiredX = sizeMultiplier * (name === 'aemeath' ? 0.2 :
+            (name.indexOf('screen') === 0 ? 1 : facing));
+        const desiredY = sizeMultiplier * (name === 'aemeath' ? 0.2 : 1);
         const currentScale = layer.scale;
         if (Math.abs(currentScale.x - desiredX) > 0.001 ||
             Math.abs(currentScale.y - desiredY) > 0.001) {
@@ -352,6 +360,10 @@ function render() {
     }
     if (hitbox) {
         hitbox.visible = true;
+        const hitSize = Math.max(0.12, sizeMultiplier);
+        const hs = hitbox.scale;
+        if (Math.abs(hs.x-hitSize)>0.001 || Math.abs(hs.y-hitSize)>0.001)
+            hitbox.scale = new Vec3(hitSize,hitSize,1);
         const p = hitbox.origin;
         if (Math.abs(p.x - x) > 0.01 || Math.abs(p.y - y) > 0.01)
             hitbox.origin = new Vec3(x, y, 0);
@@ -373,6 +385,9 @@ export function init() {
     const saved = localStorage.get(STORAGE_KEY);
     if (saved && (saved.mode === 'A' || saved.mode === 'B')) {
         mode = saved.mode;
+        if (typeof saved.sizeMultiplier==='number' && isFinite(saved.sizeMultiplier))
+            sizeMultiplier=clamp(saved.sizeMultiplier,0,2);
+        if (MANUAL_NAMES.indexOf(saved.manualVisual)>=0)manualVisual=saved.manualVisual;
         const canvas = bounds();
         // Migrate saved positions from the previous 1000x1000 scene.
         const oldWidth = typeof saved.width === 'number' && saved.width > 200 ? saved.width : 1000;
@@ -388,7 +403,7 @@ export function init() {
     }
     stayOnScreen();
     if (mode === 'B') {
-        y = HALF_SIZE;
+        y = canvasHalfSize();
         const animation = layers[screenName].getTextureAnimation();
         if (animation) {
             animation.setFrame(0);
@@ -396,13 +411,16 @@ export function init() {
         }
         screenDelay = random(10, 30);
     }
+    initUi();
     render();
 }
 
 export function update(value) {
     const dt = clamp(engine.frametime, 0, 0.05);
     elapsed += dt;
+    processMenuEvents();
     processEvents();
+    handleContextHold();
     finishClickSequence();
     if (mode === 'A') stepA(dt);
     else stepB(dt);
@@ -412,6 +430,8 @@ export function update(value) {
         saveDelay = 5;
     }
     render();
+    updateMediaData(dt);
+    updateUiGeometry();
     value.x = x;
     value.y = y;
     value.z = 0;
@@ -426,7 +446,10 @@ export function mediaPlaybackChanged(event) {
     const playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;
     if (playing === musicPlaying) return;
     musicPlaying = playing;
+    mediaPaused = !playing;
     if (playing) {
+        menuOpen = false;
+        manualVisual = null;
         if (mode === 'B') setMode('A');
         releaseGrab();
         pointerPressed = false;
@@ -451,3 +474,295 @@ export function mediaStatusChanged(event) {
     }
 }
 
+
+// -------------------------------------------------------------
+// UI MODULE. Change UI_STYLE and UI_LAYOUT to reskin without changing behavior.
+// Components are built as text / Solid Placeholder layers and follow companion origin.
+// -------------------------------------------------------------
+const UI_STYLE = {
+    background: "0.075 0.078 0.12",
+    border: "0.85 0.82 0.97",
+    panel: "0.13 0.14 0.20",
+    accent: "0.56 0.89 0.83",
+    muted: "0.52 0.54 0.67",
+    text: "0.96 0.94 0.98",
+    highlight: "0.26 0.29 0.41"
+};
+const UI_LAYOUT = {
+    mediaW: 360, mediaH: 282, menuW: 252, menuH: 348,
+    rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
+};
+const MANUAL_NAMES = ['idle1','idle2','idle3','idle4',
+    'screen1','screen2','screen3','screen4','screen5','screen6','screen7'];
+let sizeMultiplier = 1;
+let manualVisual = null;
+let menuOpen = false, sliderDragging = false, menuHoldOpened = false;
+let menuCenterX = 960, menuCenterY = 540, mediaCenterX = 960, mediaCenterY = 540;
+let ui = {};
+let uiReady = false;
+let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
+let mediaAlbum = '', mediaHasArt = false;
+let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
+let mediaPaused = false;
+let spectrum = null;
+let levels = new Array(16).fill(0);
+
+function canvasHalfSize() {
+    return Math.max(0, 100 * sizeMultiplier);
+}
+function fmtTime(seconds) {
+    if (!(seconds >= 0) || !isFinite(seconds)) return '--:--';
+    const n = Math.floor(seconds);
+    return Math.floor(n / 60) + ':' + ('0' + (n % 60)).slice(-2);
+}
+function uiPosition(layer, px, py) {
+    if (!layer) return;
+    const p = layer.origin;
+    if (!p || Math.abs(p.x-px) > 0.1 || Math.abs(p.y-py) > 0.1)
+        layer.origin = new Vec3(px, py, 0);
+}
+function makeBlock(name, w, h, color) {
+    const layer = thisScene.createLayer({
+        name: name, image: 'models/util/solidlayer.json',
+        origin: '0 0 0', size: w + ' ' + h,
+        color: color, alpha: 1, visible: false, solid: false
+    });
+    ui[name] = layer;
+    return layer;
+}
+function makeText(name, initial, pt, maxwidth, color) {
+    // Text layer creation uses the officially documented createLayer(text) API.
+    // Text styling is independent of the companion behavior state machine.
+    const layer = thisScene.createLayer({
+        name: name, text: initial, pointsize: pt,
+        color: color || UI_STYLE.text, maxwidth: maxwidth,
+        limitwidth: true, limitrows: true, maxrows: 1,
+        horizontalalign: 'center', verticalalign: 'center',
+        origin: '0 0 0', scale: '1 1 1', visible: false
+    });
+    ui[name] = layer;
+    return layer;
+}
+function initUi() {
+    if (uiReady) return;
+    uiReady = true;
+    makeBlock('media_outer', 368, 290, UI_STYLE.border);
+    makeBlock('media_inner', 360, 282, UI_STYLE.background);
+    makeBlock('media_tail', 18, 14, UI_STYLE.border);
+    makeBlock('media_cover_frame', 100, 100, UI_STYLE.border);
+    makeBlock('media_cover_empty', 92, 92, UI_STYLE.panel);
+    makeText('media_title', mediaTitle, 16, 210);
+    makeText('media_artist', mediaArtist, 12, 210, UI_STYLE.muted);
+    makeText('media_album', '', 10, 210, UI_STYLE.muted);
+    makeBlock('media_progress_back', 295, 5, UI_STYLE.highlight);
+    makeBlock('media_progress_fill', 1, 5, UI_STYLE.accent);
+    makeText('media_clock', '--:-- / --:--', 11, 225, UI_STYLE.text);
+    makeText('media_transport_prev', '<', 20, 42);
+    makeText('media_transport_play', 'II', 18, 42);
+    makeText('media_transport_next', '>', 20, 42);
+    for (let i = 0; i < 16; i++) makeBlock('media_band_' + i, 9, 3, UI_STYLE.accent);
+    makeBlock('menu_outer', 258, 354, UI_STYLE.border);
+    makeBlock('menu_inner', 252, 348, UI_STYLE.background);
+    makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
+    for (let i = 0; i < MANUAL_NAMES.length; i++) {
+        makeBlock('menu_row_back_' + i, 239, 20, UI_STYLE.panel);
+        makeText('menu_row_text_' + i, MANUAL_NAMES[i], 12, 210);
+    }
+    makeText('menu_scale_label', 'SCALE 1.00x', 12, 210, UI_STYLE.text);
+    makeBlock('menu_slider_track', 208, 6, UI_STYLE.highlight);
+    makeBlock('menu_slider_fill', 104, 6, UI_STYLE.accent);
+    makeBlock('menu_slider_knob', 10, 18, UI_STYLE.border);
+}
+function showMenu() {
+    if (menuOpen) { menuOpen = false; return; }
+    menuOpen = true;
+    sliderDragging = false;
+    manualVisual = null;
+    target = null;
+    action = 'idle';
+    armed = false;
+    dragging = false;
+    resetClickSequence();
+    persist();
+}
+function updateUiGeometry() {
+    if (!uiReady) return;
+    const size = bounds();
+    // Keep the speech bubble above the character, shifted into canvas if needed.
+    mediaCenterX = clamp(x, UI_LAYOUT.mediaW / 2 + 10, size.width - UI_LAYOUT.mediaW / 2 - 10);
+    mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 22,
+        UI_LAYOUT.mediaH/2 + 8, size.height - UI_LAYOUT.mediaH/2 - 8);
+    const mx = mediaCenterX, my = mediaCenterY;
+    const bubble = musicPlaying;
+    const place = (name,ox,oy,visible)=> {
+        const layer = ui[name]; if (!layer) return;
+        layer.visible = visible;
+        if (visible) uiPosition(layer, mx+ox, my+oy);
+    };
+    place('media_outer',0,0,bubble);
+    place('media_inner',0,0,bubble);
+    place('media_tail',clamp(x-mx,-152,152),-148,bubble);
+    place('media_cover_frame',-120,68,bubble);
+    place('media_cover_empty',-120,68,bubble && !mediaHasArt);
+    const cover = thisScene.getLayer('media_album_cover');
+    if (cover) {
+        cover.visible = bubble && mediaHasArt;
+        if (bubble) uiPosition(cover,mx-120,my+68);
+    }
+    place('media_title',57,108,bubble);
+    place('media_artist',57,76,bubble);
+    place('media_album',57,46,bubble);
+    place('media_progress_back',0,-10,bubble);
+    const progress = ui.media_progress_fill;
+    const pct = mediaDuration > 0 ? clamp(mediaPosition/mediaDuration,0,1):0;
+    if(progress) {
+        progress.visible=bubble;
+        if(bubble) {
+            progress.size = new Vec2(Math.max(1,295*pct),5);
+            uiPosition(progress,mx-147.5+147.5*pct,my-10);
+        }
+    }
+    place('media_clock',0,-32,bubble);
+    place('media_transport_prev',-78,-66,bubble);
+    place('media_transport_play',0,-66,bubble);
+    place('media_transport_next',78,-66,bubble);
+    for (let i=0;i<16;i++) {
+        const bar=ui['media_band_'+i]; if(!bar) continue;
+        bar.visible=bubble;
+        if(bubble){
+            const height=3+Math.round(levels[i]*30);
+            // Scale rather than changing the physical placeholder size every frame.
+            bar.scale=new Vec3(1,height/3,1);
+            uiPosition(bar,mx-112+i*15,my-119+height/2);
+        }
+    }
+    // Transport hitboxes are stable input layers, not tied to changing UI text.
+    const buttons=['media_btn_prev','media_btn_play','media_btn_next'];
+    const xs=[-78,0,78];
+    for(let i=0;i<buttons.length;i++){
+        const btn=thisScene.getLayer(buttons[i]);
+        if(!btn) continue;
+        btn.visible=bubble;
+        if(bubble) uiPosition(btn,mx+xs[i],my-66);
+    }
+    // Menu is detached from the skin and built from named reusable components.
+    menuCenterX = clamp(x+canvasHalfSize()+UI_LAYOUT.menuW/2+14,
+        UI_LAYOUT.menuW/2+10,size.width-UI_LAYOUT.menuW/2-10);
+    menuCenterY = clamp(y,UI_LAYOUT.menuH/2+10,size.height-UI_LAYOUT.menuH/2-10);
+    const cx=menuCenterX, cy=menuCenterY, top=cy+UI_LAYOUT.menuH/2;
+    const mPlace=(name,px,py)=>{
+        const layer=ui[name];if(!layer)return;
+        layer.visible=menuOpen;
+        if(menuOpen)uiPosition(layer,px,py);
+    };
+    mPlace('menu_outer',cx,cy);mPlace('menu_inner',cx,cy);
+    mPlace('menu_heading',cx,top-16);
+    for(let i=0;i<MANUAL_NAMES.length;i++){
+        const yy=top-UI_LAYOUT.rowStart-(i+0.5)*UI_LAYOUT.rowHeight;
+        mPlace('menu_row_back_'+i,cx,yy);
+        mPlace('menu_row_text_'+i,cx,yy);
+    }
+    mPlace('menu_scale_label',cx,top-277);
+    mPlace('menu_slider_track',cx,top-UI_LAYOUT.sliderTop);
+    const fill=ui.menu_slider_fill;
+    if(fill){fill.visible=menuOpen;if(menuOpen) {
+        const width=202*sizeMultiplier/2;
+        fill.scale=new Vec3(Math.max(0.005,width/104),1,1);
+        uiPosition(fill,cx-101+width/2,top-UI_LAYOUT.sliderTop);
+    }}
+    mPlace('menu_slider_knob',cx-101+202*(sizeMultiplier/2),top-UI_LAYOUT.sliderTop);
+    const menuHit=thisScene.getLayer('menu_hitbox');
+    if(menuHit){menuHit.visible=menuOpen;if(menuOpen)uiPosition(menuHit,cx,cy);}
+}
+function updateMediaData(dt) {
+    if (musicPlaying && mediaTimelineAt>=0 && mediaDuration>0)
+        mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
+    if (ui.media_title) {
+        ui.media_title.text=mediaTitle || 'Unknown track';
+        ui.media_artist.text=mediaArtist || 'Unknown artist';
+        ui.media_album.text=mediaAlbum || '';
+        ui.media_clock.text=fmtTime(mediaPosition)+' / '+fmtTime(mediaDuration);
+        ui.media_transport_play.text=mediaPaused ? '>' : 'II';
+        ui.menu_scale_label.text='SCALE '+sizeMultiplier.toFixed(2)+'x';
+    }
+    if (!spectrum && engine.registerAudioBuffers)
+        spectrum=engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
+    if (spectrum && spectrum.average) {
+        for(let i=0;i<16;i++){
+            const raw=Math.max(0,Math.min(1,Number(spectrum.average[i])||0));
+            const value=musicPlaying ? Math.sqrt(raw) : 0;
+            levels[i] += (value-levels[i]) * Math.min(1,dt*16);
+        }
+    }
+}
+function updateMenuSlider(mouseX) {
+    const t=clamp((mouseX-(menuCenterX-101))/202,0,1);
+    sizeMultiplier=Math.round(t*200)/100;
+    stayOnScreen();
+}
+function processMenuEvents() {
+    if (!shared.aemeathUiEvents) shared.aemeathUiEvents=[];
+    const events=shared.aemeathUiEvents.splice(0);
+    for (let i=0;i<events.length;i++) {
+        if (!menuOpen) continue;
+        const e=events[i], top=menuCenterY+UI_LAYOUT.menuH/2;
+        const dy=top-e.y;
+        const slider=dy>=283&&dy<=330;
+        if(e.type==='down') {
+            if(slider) {sliderDragging=true;updateMenuSlider(e.x);}
+        } else if(e.type==='up') {
+            if(sliderDragging){updateMenuSlider(e.x);sliderDragging=false;persist();continue;}
+            const row=Math.floor((dy-UI_LAYOUT.rowStart)/UI_LAYOUT.rowHeight);
+            if(row>=0&&row<MANUAL_NAMES.length) {
+                const selected=MANUAL_NAMES[row];
+                if(selected.indexOf('screen')===0) {
+                    if(mode==='A')setMode('B');
+                    screenName=selected;
+                    screenDelay=random(10,30);
+                    falling=mode==='B'&&y>canvasHalfSize();
+                } else {
+                    if(mode==='B')setMode('A');
+                    idleName=selected;setIdle(false);
+                }
+                manualVisual=selected;
+                menuOpen=false;
+                persist();
+            }
+        }
+    }
+    if(sliderDragging&&input.cursorLeftDown)
+        updateMenuSlider(input.cursorWorldPosition.x);
+    else if(sliderDragging&&!input.cursorLeftDown){sliderDragging=false;persist();}
+}
+function handleContextHold() {
+    // SceneScript has no documented right-button property/cursorRightClick.
+    // A stationary 650ms left press is a reliable alternative.
+    if (!pointerPressed || !armed || dragging || menuOpen || sliderDragging) return;
+    const duration=Date.now()-pointerDownTime;
+    const cur=input.cursorWorldPosition;
+    const dist=cur ? (cur.x-pointerDownX)*(cur.x-pointerDownX)
+        +(cur.y-pointerDownY)*(cur.y-pointerDownY) : 1e10;
+    if (duration>=650&&dist<=DRAG_THRESHOLD*DRAG_THRESHOLD) {
+        showMenu();
+        menuHoldOpened=true;
+        suppressClickUntil=elapsed+0.3;
+    }
+}
+
+export function mediaPropertiesChanged(event) {
+    mediaTitle = event.title || 'Unknown track';
+    mediaArtist = event.artist || 'Unknown artist';
+    mediaAlbum = event.albumTitle || '';
+    // New song metadata arrives before its optional new timeline.
+    mediaPosition=0; mediaDuration=0; mediaTimelineAt=-1;
+}
+export function mediaThumbnailChanged(event) {
+    mediaHasArt = !!event.hasThumbnail;
+}
+export function mediaTimelineChanged(event) {
+    if (typeof event.position === 'number' && isFinite(event.position))
+        mediaPosition = Math.max(0,event.position);
+    if (typeof event.duration === 'number' && isFinite(event.duration))
+        mediaDuration = Math.max(0,event.duration);
+    mediaTimelineAt = Date.now();
+}

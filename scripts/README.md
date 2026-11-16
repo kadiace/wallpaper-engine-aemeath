@@ -1,28 +1,51 @@
-# Aemeath – Stable Hitbox Input
+# Aemeath – Media Speech Bubble and Character Selection
 
-Scene: 1920×1080 (scales to UHD 3840×2160); character: 200×200, except the 1000×1000 aemeath GIF at its existing 0.2 scale.
+The original animated character (A/B, roaming, drag, double-click, media override) remains a 1920×1080 Scene. Both new UIs are composed of **separate, named layers**; `UI_STYLE` and `UI_LAYOUT` at the bottom of `scripts/companion.js` define the visual skin independently of behavior.
 
-## Click architecture
-- The permanent **companion_hitbox** is an invisible 200×200 Solid Placeholder using Wallpaper Engine's internal `models/util/solidlayer.json`. It is `visible:true`, `solid:true`, `alpha:0` and has click propagation disabled.
-- All 14 GIF layers are **non-solid** (`solid:false`) and no longer bind independent input scripts. The hitbox's Origin follows the character regardless of which animation is displayed.
-- `scripts/cursor-bridge.js` is embedded on the hitbox's Visibility property; `scripts/companion.js` is embedded on `aemeath` Origin. Both sources are duplicated inline within `scene.json`. Any source edit must be synchronized with the inline copy.
-- Hitbox `cursorDown`/`cursorUp` pairs are the sole input count. `cursorClick` is logged for diagnostics but never counted. Real wall-clock timestamps are collected with `Date.now()`.
-- Two clicks at nearly the same location (within 24 units per axis) less than 500ms apart form a double-click. A short 180ms third-click grace period follows; if no third click arrives, A/B toggles. Three clicks within that grace period cancel the toggle. A third click after the grace period cannot cancel an already committed double-click.
-- Temporary event-level diagnostics use `DEBUG_INPUT = true` in both scripts; the Wallpaper Engine editor **Log** tab will show `[Aemeath hitbox]`, `[Aemeath click]`, and `[Aemeath mode]`. Disable debug before release to avoid verbose logs.
+## Media speech bubble
 
-## Behavior preserved
-- **A:** Independent X/Y roaming with left/right mirroring; random idle1–4; single click immediately chooses another idle. Drag displays drag.gif and stays at the release position; releasing picks a different idle. Hitbox follows the bot.
-- **B:** Falls to the scene bottom, stays fixed there, plays a random screen1–7 animation every 10–30 seconds; single click immediately chooses another screen animation.
-- **Music/video media session playing:** Forces state A and displays aemeath.gif, including while dragging; B remains blocked. Stop/pause remains in A. GIF scale is unchanged.
-- **Persistence:** Last A/B mode and character X/Y are saved, with migration from older canvas dimensions.
+When Windows global media integration reports PLAYING, a pixel-block speech bubble appears above Aemeath and follows the character. It contains:
 
-## Live editor verification
-The GitHub-side regression tests are **mocks**, not a Wallpaper Engine Windows execution. Open the Scene, **Run Preview**, and inspect the **Log** tab:
-1. Single click: one `down`, one `up`, and `count=1`; idle/screen changes without A/B toggling.
-2. Double click at the same location: two pairs, `count=2`, then after about 180ms one `[Aemeath mode]` change.
-3. Three fast clicks: no A/B toggle. Double-click again in B: back to A.
-4. Drag and release: no click count for drag, hitbox moves with sprite. Music continues to display aemeath.gif during drag.
+- Square **92×92 album cover** from the system `$mediaThumbnail` texture, or a dark placeholder if no cover is available
+- Song title, artist, album name when available
+- Current play position and total length in `m:ss`, and a proportional progress indicator
+- A **16-bin real-time audio-frequency amplitude** meter based on `engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16)`
+- Previous / Play-Pause / Next buttons implemented as user-shortcut inputs
 
-**Important runtime uncertainty:** Some Wallpaper Engine versions might not hit-test a completely transparent (`alpha: 0`) Solid Placeholder. If no `[Aemeath hitbox]` messages appear, temporarily change the hitbox's alpha to `0.01` in the editor and retry. This distinguishes alpha culling from script errors.
+**The three transport controls are not an unrestricted media-player API.** Wallpaper Engine's SceneScript cannot issue system-media transport commands directly. Open the wallpaper's Project Settings → User Properties and assign the three new **User Shortcut** entries (`aemeath_previous`, `aemeath_playpause`, `aemeath_next`) to commands or media key macros appropriate for your computer. Until bound, the buttons cannot control the external player. User Shortcuts must be configured separately on each computer. The underlying `engine.openUserShortcut()` is called only from the corresponding cursorClick event.
 
-To see logs when wallpaper is applied on Windows, enable verbose logging in settings and check the Wallpaper Engine `log.txt`.
+Timeline is optional in media-player integrations; absent duration/position is shown as `--:--`, not invented. Audio-frequency bars represent current system audio output; they are not guaranteed to isolate the playing media app. Album cover is loaded through Wallpaper Engine's `{"name":"$mediaThumbnail","type":"system"}` material texture reference. Title/artist use SceneScript `mediaPropertiesChanged`. UI is independent of the current GIF's texture and of the context menu.
+
+## Character selection and scale
+
+Wallpaper Engine's documented SceneScript cursor API **does not provide a right-click event or a right mouse button state**. Native right-click may open the Windows desktop context menu instead, and cannot be reliably intercepted by a Scene wallpaper. Therefore, the working supported input for the menu is: **hold the left mouse button over a stationary character for 650ms** (without moving the pointer more than 7 scene units). The menu is designed so an external Windows helper can add a right-click trigger later without changing UI code.
+
+Menu shows eleven GIF selections, `idle1`–`idle4` and `screen1`–`screen7`. Clicking a name immediately displays that GIF and pins it until the next user interaction; selecting an idle selects A, selecting a screen selects B. While B is pinned, periodic random screen changes are paused. Media playback still overrides with `aemeath`.
+
+Below the list is a **live 0.00–2.00× scale slider**. The character's visual scale, collision hitbox and scene boundary constraints update while dragging, and the size is saved in `localStorage`. At scale 0, the hitbox remains at least 12% size so the user can reopen the menu to recover. The media bubble and menu have fixed-size typography; they are not distorted by character scale. To reskin the speech bubble, edit `UI_STYLE` and `UI_LAYOUT`.
+
+## Source and verification
+
+- `scripts/companion.js`: controller, media state and configurable UI module, fully embedded in `scene.json` on `aemeath.origin`
+- `scripts/menu-hitbox.js`: menu input events, embedded on `menu_hitbox.visible`
+- `scripts/cursor-bridge.js`: existing companion cursor events
+- `materials/aemeath_album_cover.json`, `models/aemeath_album_cover.json`: system media cover layer
+- `project.json`: the three User Shortcut properties
+- `scene.json`: three transport button layers and menu input layer; other visuals are created once by SceneScript
+
+**Live validation is essential.** The SceneScript mock verifies layer creation, metadata handling, 16 audio bars, timeline formatting, and scaling. It does **not** verify Windows input interception, user-shortcut bindings or Wallpaper Engine's internal `$mediaThumbnail` texture rendering.
+
+## Editor smoke test
+
+1. Pull master, open the wallpaper in Wallpaper Engine **Run Preview**, start a supported Windows-media-session player, confirm pixel UI bubble follows Aemeath, displays cover/title/artist and audio bars move.
+2. In Project Settings bind the new User Shortcuts. Click previous/play/next once each and confirm external player commands.
+3. Stop playback; the bubble disappears; A continues.
+4. Hold left mouse button on the character for 650ms without moving; the menu opens. Choose each of the 11 GIF names; it should display immediately.
+5. Drag the Scale slider to 0.00, 1.00, 2.00; character responds immediately; reload and verify the scale remains.
+6. Confirm single/double click and drag still work when the menu is closed. Right-click remains an unsupported Windows/SceneScript constraint.
+
+Official docs:
+- https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
+- https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/media.html
+- https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/cursor.html
+- https://docs.wallpaperengine.io/en/scene/userproperties/usershortcut.html
