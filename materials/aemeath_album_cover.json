@@ -8,10 +8,7 @@
       "depthwrite": "disabled",
       "shader": "genericimage4",
       "textures": [
-        {
-          "name": "$mediaThumbnail",
-          "type": "system"
-        }
+        "$mediaThumbnail"
       ]
     }
   ]

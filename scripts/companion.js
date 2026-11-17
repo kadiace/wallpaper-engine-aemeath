@@ -454,7 +454,6 @@ export function mediaPlaybackChanged(event) {
     const playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;
     if (playing === musicPlaying) return;
     musicPlaying = playing;
-    mediaPaused = !playing;
     if (playing) {
         menuOpen = false;
         manualVisual = null;
@@ -497,7 +496,14 @@ const UI_STYLE = {
     highlight: "0.26 0.29 0.41"
 };
 const UI_LAYOUT = {
-    mediaW: 360, mediaH: 282, menuW: 252, menuH: 348,
+    // Media speech bubble skin: larger 1:1 album cover + right-aligned content column.
+    // Change these measurements to reskin without touching the media/controller logic.
+    mediaW: 472, mediaH: 240,
+    coverSize: 176, coverX: -134, coverY: 15,
+    infoX: 101, titleY: 69, artistY: 34,
+    progressWidth: 228, progressX: 99, progressY: -29,
+    clockY: -53, spectrumBaseY: -104,
+    menuW: 252, menuH: 348,
     rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
 };
 const MANUAL_NAMES = ['idle1','idle2','idle3','idle4',
@@ -512,7 +518,6 @@ let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
 let mediaAlbum = '', mediaHasArt = false;
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
-let mediaPaused = false;
 // Must be declared at SceneScript global scope, not inside updateMediaData().
 // Reuse the registered buffer in every frame; never register it during update.
 const spectrum = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
@@ -541,14 +546,13 @@ function makeBlock(name, w, h, color) {
     ui[name] = layer;
     return layer;
 }
-function makeText(name, initial, pt, maxwidth, color) {
-    // Text layer creation uses the officially documented createLayer(text) API.
-    // Text styling is independent of the companion behavior state machine.
+function makeText(name, initial, pt, maxwidth, color, alignment) {
+    // Text fields use a shared type scale; content column is left aligned.
     const layer = thisScene.createLayer({
         name: name, text: initial, pointsize: pt,
         color: color || UI_STYLE.text, maxwidth: maxwidth,
         limitwidth: true, limitrows: true, maxrows: 1,
-        horizontalalign: 'center', verticalalign: 'center',
+        horizontalalign: alignment || 'left', verticalalign: 'center',
         origin: '0 0 0', scale: '1 1 1', visible: false
     });
     ui[name] = layer;
@@ -557,21 +561,26 @@ function makeText(name, initial, pt, maxwidth, color) {
 function initUi() {
     if (uiReady) return;
     uiReady = true;
-    makeBlock('media_outer', 368, 290, UI_STYLE.border);
-    makeBlock('media_inner', 360, 282, UI_STYLE.background);
-    makeBlock('media_tail', 18, 14, UI_STYLE.border);
-    makeBlock('media_cover_frame', 100, 100, UI_STYLE.border);
-    makeBlock('media_cover_empty', 92, 92, UI_STYLE.panel);
-    makeText('media_title', mediaTitle, 16, 210);
-    makeText('media_artist', mediaArtist, 12, 210, UI_STYLE.muted);
-    makeText('media_album', '', 10, 210, UI_STYLE.muted);
-    makeBlock('media_progress_back', 295, 5, UI_STYLE.highlight);
-    makeBlock('media_progress_fill', 1, 5, UI_STYLE.accent);
-    makeText('media_clock', '--:-- / --:--', 11, 225, UI_STYLE.text);
-    makeText('media_transport_prev', '<', 20, 42);
-    makeText('media_transport_play', 'II', 18, 42);
-    makeText('media_transport_next', '>', 20, 42);
-    for (let i = 0; i < 16; i++) makeBlock('media_band_' + i, 9, 3, UI_STYLE.accent);
+    makeBlock('media_outer', 480, 248, UI_STYLE.border);
+    makeBlock('media_inner', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.background);
+    makeBlock('media_tail', 22, 12, UI_STYLE.border);
+    makeBlock('media_cover_frame', UI_LAYOUT.coverSize + 8,
+        UI_LAYOUT.coverSize + 8, UI_STYLE.border);
+    makeBlock('media_cover_empty', UI_LAYOUT.coverSize,
+        UI_LAYOUT.coverSize, UI_STYLE.panel);
+    // Existing media texture must be ABOVE the dynamic background & placeholder
+    // but BELOW text, progress, and spectrum layers created next.
+    const cover = thisScene.getLayer('media_album_cover');
+    const coverBackground = ui.media_cover_empty;
+    if (cover && coverBackground)
+        thisScene.sortLayer(cover, thisScene.getLayerIndex(coverBackground) + 1);
+    makeText('media_title', mediaTitle, 20, 232, UI_STYLE.text, 'left');
+    makeText('media_artist', mediaArtist, 14, 232, UI_STYLE.muted, 'left');
+    makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 6, UI_STYLE.highlight);
+    makeBlock('media_progress_fill', 1, 6, UI_STYLE.accent);
+    makeText('media_time_current', '--:--', 11, 90, UI_STYLE.text, 'left');
+    makeText('media_time_total', '--:--', 11, 90, UI_STYLE.muted, 'right');
+    for (let i = 0; i < 16; i++) makeBlock('media_band_' + i, 8, 3, UI_STYLE.accent);
     makeBlock('menu_outer', 258, 354, UI_STYLE.border);
     makeBlock('menu_inner', 252, 348, UI_STYLE.background);
     makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
@@ -605,62 +614,64 @@ function showMenu() {
 function updateUiGeometry() {
     if (!uiReady) return;
     const size = bounds();
-    // Keep the speech bubble above the character, shifted into canvas if needed.
-    mediaCenterX = clamp(x, UI_LAYOUT.mediaW / 2 + 10, size.width - UI_LAYOUT.mediaW / 2 - 10);
-    mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 22,
+    // The speech bubble is 16:9-ish overall, while cover art is always exactly 1:1.
+    // Clamp the entire bubble, not individual labels, to avoid broken alignment.
+    mediaCenterX = clamp(x, UI_LAYOUT.mediaW/2 + 8,
+        size.width - UI_LAYOUT.mediaW/2 - 8);
+    mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 24,
         UI_LAYOUT.mediaH/2 + 8, size.height - UI_LAYOUT.mediaH/2 - 8);
     const mx = mediaCenterX, my = mediaCenterY;
     const bubble = musicPlaying;
-    const place = (name,ox,oy,visible)=> {
-        const layer = ui[name]; if (!layer) return;
+    const place = (name, ox, oy, visible) => {
+        const layer = ui[name];
+        if (!layer) return;
         layer.visible = visible;
-        if (visible) uiPosition(layer, mx+ox, my+oy);
+        if (visible) uiPosition(layer, mx + ox, my + oy);
     };
-    place('media_outer',0,0,bubble);
-    place('media_inner',0,0,bubble);
-    place('media_tail',clamp(x-mx,-152,152),-148,bubble);
-    place('media_cover_frame',-120,68,bubble);
-    place('media_cover_empty',-120,68,bubble && !mediaHasArt);
+    place('media_outer', 0, 0, bubble);
+    place('media_inner', 0, 0, bubble);
+    place('media_tail', clamp(x-mx,-184,184), -126, bubble);
+    place('media_cover_frame', UI_LAYOUT.coverX, UI_LAYOUT.coverY, bubble);
+    // Show fallback behind the album texture. When Wallpaper Engine has no art,
+    // its system texture is transparent, revealing the fallback automatically.
+    place('media_cover_empty', UI_LAYOUT.coverX, UI_LAYOUT.coverY, bubble);
     const cover = thisScene.getLayer('media_album_cover');
     if (cover) {
-        cover.visible = bubble && mediaHasArt;
-        if (bubble) uiPosition(cover,mx-120,my+68);
+        // Do NOT gate the artwork on a mediaThumbnailChanged callback.
+        // The native $mediaThumbnail texture updates independently of the event.
+        cover.visible = bubble;
+        if (bubble) uiPosition(cover, mx + UI_LAYOUT.coverX,
+            my + UI_LAYOUT.coverY);
     }
-    place('media_title',57,108,bubble);
-    place('media_artist',57,76,bubble);
-    place('media_album',57,46,bubble);
-    place('media_progress_back',0,-10,bubble);
+    place('media_title', UI_LAYOUT.infoX, UI_LAYOUT.titleY, bubble);
+    place('media_artist', UI_LAYOUT.infoX, UI_LAYOUT.artistY, bubble);
+    place('media_progress_back', UI_LAYOUT.progressX,
+        UI_LAYOUT.progressY, bubble);
     const progress = ui.media_progress_fill;
-    const pct = mediaDuration > 0 ? clamp(mediaPosition/mediaDuration,0,1):0;
-    if(progress) {
-        progress.visible=bubble;
-        if(bubble) {
-            progress.size = new Vec2(Math.max(1,295*pct),5);
-            uiPosition(progress,mx-147.5+147.5*pct,my-10);
+    const fraction = mediaDuration > 0 ?
+        clamp(mediaPosition / mediaDuration, 0, 1) : 0;
+    if (progress) {
+        progress.visible = bubble;
+        if (bubble) {
+            const width = Math.max(1, UI_LAYOUT.progressWidth * fraction);
+            progress.size = new Vec2(width, 6);
+            uiPosition(progress,
+                mx + UI_LAYOUT.progressX - UI_LAYOUT.progressWidth/2 + width/2,
+                my + UI_LAYOUT.progressY);
         }
     }
-    place('media_clock',0,-32,bubble);
-    place('media_transport_prev',-78,-66,bubble);
-    place('media_transport_play',0,-66,bubble);
-    place('media_transport_next',78,-66,bubble);
-    for (let i=0;i<16;i++) {
-        const bar=ui['media_band_'+i]; if(!bar) continue;
-        bar.visible=bubble;
-        if(bubble){
-            const height=3+Math.round(levels[i]*30);
-            // Scale rather than changing the physical placeholder size every frame.
-            bar.scale=new Vec3(1,height/3,1);
-            uiPosition(bar,mx-112+i*15,my-119+height/2);
+    place('media_time_current', 19, UI_LAYOUT.clockY, bubble);
+    place('media_time_total', 181, UI_LAYOUT.clockY, bubble);
+    for (let i = 0; i < 16; i++) {
+        const bar = ui['media_band_' + i];
+        if (!bar) continue;
+        bar.visible = bubble;
+        if (bubble) {
+            const height = 3 + Math.round(levels[i] * 27);
+            bar.scale = new Vec3(1, height/3, 1);
+            uiPosition(bar, mx - 9 + i * 14.2,
+                my + UI_LAYOUT.spectrumBaseY + height/2);
         }
-    }
-    // Transport hitboxes are stable input layers, not tied to changing UI text.
-    const buttons=['media_btn_prev','media_btn_play','media_btn_next'];
-    const xs=[-78,0,78];
-    for(let i=0;i<buttons.length;i++){
-        const btn=thisScene.getLayer(buttons[i]);
-        if(!btn) continue;
-        btn.visible=bubble;
-        if(bubble) uiPosition(btn,mx+xs[i],my-66);
     }
     // Menu is detached from the skin and built from named reusable components.
     menuCenterX = menuAnchorX;
@@ -695,12 +706,12 @@ function updateMediaData(dt) {
         mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
     if (ui.media_title) {
         ui.media_title.text=mediaTitle || 'Unknown track';
-        ui.media_artist.text=mediaArtist || 'Unknown artist';
-        ui.media_album.text=mediaAlbum || '';
-        ui.media_clock.text=(mediaTimelineAt<0 ? '--:--' : fmtTime(mediaPosition))
-            +' / '+(mediaDuration>0 ? fmtTime(mediaDuration) : '--:--');
-        ui.media_transport_play.text=mediaPaused ? '>' : 'II';
-        ui.menu_scale_label.text='SCALE '+sizeMultiplier.toFixed(2)+'x';
+        ui.media_artist.text = mediaArtist || 'Unknown artist';
+        ui.media_time_current.text = mediaTimelineAt < 0 ?
+            '--:--' : fmtTime(mediaPosition);
+        ui.media_time_total.text = mediaDuration > 0 ?
+            fmtTime(mediaDuration) : '--:--';
+        ui.menu_scale_label.text = 'SCALE '+sizeMultiplier.toFixed(2)+'x';
     }
 
     if (spectrum && spectrum.average) {

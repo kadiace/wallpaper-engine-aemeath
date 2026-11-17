@@ -1,59 +1,35 @@
-# Aemeath – Media Speech Bubble and Character Selection
+# Aemeath media speech bubble — layout v2
 
-The original animated character (A/B, roaming, drag, double-click, media override) remains a 1920×1080 Scene. Both new UIs are composed of **separate, named layers**; `UI_STYLE` and `UI_LAYOUT` at the bottom of `scripts/companion.js` define the visual skin independently of behavior.
+Wallpaper Engine scene: FHD 1920×1080. Aemeath supports A/B idle/roam/screen behaviors, dragging, a stationary long-press menu, live 0–2× scaling, and media-triggered `aemeath` sprite.
 
-## Media speech bubble
+## Media speech bubble (no transport buttons)
 
-When Windows global media integration reports PLAYING, a pixel-block speech bubble appears above Aemeath and follows the character. It contains:
+- The **current album cover is a 176×176 square** (1:1). Its image model lives in `models/aemeath_album_cover.json` and material in `materials/aemeath_album_cover.json`.
+- The cover's `genericimage4` material now declares `textures: ["$mediaThumbnail"]` (a single system texture name string), not an object masquerading as a texture. Wallpaper Engine swaps the content of the special media thumbnail texture when media art arrives.
+- The existing cover layer is sorted **above** the dynamically created dark cover placeholder and **below** the subsequently created title, artist, progress/timeline and spectrum. The cover layer is visible throughout playback; it is no longer hidden until the optional `mediaThumbnailChanged` event arrives.
+- **Pixel bubble:** 480×248 including 4px border; inner 472×240, art left and metadata column right. Title: 20pt; artist: 14pt; current and total time each 11pt. Progress track: 228×6. Original 16 audio-frequency bars remain at the bottom of the metadata column. Speech bubble follows Aemeath and stays inside the canvas.
+- The entire layout and palette are configurable via `UI_LAYOUT` and `UI_STYLE` in `scripts/companion.js`; swapping the visual skin won't require changing behavior code. Metadata and play time are optional and display safe placeholders if missing.
+- **Previous/Play-Pause/Next controls removed** from the dynamic UI, static Scene layers and `project.json` shortcut properties. This speech bubble is now display-only.
 
-- Square **92×92 album cover** from the system `$mediaThumbnail` texture, or a dark placeholder if no cover is available
-- Song title, artist, album name when available
-- Current play position and total length in `m:ss`, and a proportional progress indicator
-- A **16-bin real-time audio-frequency amplitude** meter based on `engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16)`
-- Previous / Play-Pause / Next buttons implemented as user-shortcut inputs
+## Album art troubleshooting
 
-**The three transport controls are not an unrestricted media-player API.** Wallpaper Engine's SceneScript cannot issue system-media transport commands directly. Open the wallpaper's Project Settings → User Properties and assign the three new **User Shortcut** entries (`aemeath_previous`, `aemeath_playpause`, `aemeath_next`) to commands or media key macros appropriate for your computer. Until bound, the buttons cannot control the external player. User Shortcuts must be configured separately on each computer. The underlying `engine.openUserShortcut()` is called only from the corresponding cursorClick event.
+The official Wallpaper Engine integration uses **Albedo texture → Bind Album Cover → Current album cover** on the selected image layer. If the new system-texture material does not render in the Windows Wallpaper Engine editor, select the `media_album_cover` image in the Scene editor, then open **Advanced Texture Settings**, click the gear next to **Albedo**, choose **Bind Album Cover**, select **Current album cover**, and save. This editor-native binding is the authoritative fallback; the serialized form may vary by editor version. The original album cover area remains square after binding.
 
-Timeline is optional in media-player integrations; absent duration/position is shown as `--:--`, not invented. Audio-frequency bars represent current system audio output; they are not guaranteed to isolate the playing media app. Album cover is loaded through Wallpaper Engine's `{"name":"$mediaThumbnail","type":"system"}` material texture reference. Title/artist use SceneScript `mediaPropertiesChanged`. UI is independent of the current GIF's texture and of the context menu.
+Windows media integration must be enabled and the current media player must provide cover art through the Windows media overlay; some media players provide only a title and artist. If no artwork is available, the square placeholder remains visible.
 
-## Character selection and scale
+## Runtime checks
 
-Wallpaper Engine's documented SceneScript cursor API **does not provide a right-click event or a right mouse button state**. Native right-click may open the Windows desktop context menu instead, and cannot be reliably intercepted by a Scene wallpaper. Therefore, the working supported input for the menu is: **hold the left mouse button over a stationary character for 650ms** (without moving the pointer more than 7 scene units). The menu is designed so an external Windows helper can add a right-click trigger later without changing UI code. The menu's position is locked while dragging the scale slider, so the slider does not move out from under the pointer.
+1. `git pull origin master`, reopen the wallpaper's Scene editor and select Run Preview.
+2. Play music from a Windows-media-integrated player. Confirm album art visible at left, title and artist at right, two time labels and progress bar underneath, 16 frequency bars at bottom.
+3. Verify no transport controls remain in the Scene or user settings.
+4. Drag Aemeath while music plays. The bubble and album art should follow the character without changing the GIF.
+5. Pause or stop music and confirm the bubble hides. Return to A/B interaction and the long-press menu.
 
-Menu shows eleven GIF selections, `idle1`–`idle4` and `screen1`–`screen7`. Clicking a name immediately displays that GIF and pins it until the next user interaction; selecting an idle selects A, selecting a screen selects B. While B is pinned, periodic random screen changes are paused. Media playback still overrides with `aemeath`.
+## Code structure
 
-Below the list is a **live 0.00–2.00× scale slider**. The character's visual scale, collision hitbox and scene boundary constraints update while dragging, and the size is saved in `localStorage`. At scale 0, the hitbox remains at least 12% size so the user can reopen the menu to recover. The media bubble and menu have fixed-size typography; they are not distorted by character scale. To reskin the speech bubble, edit `UI_STYLE` and `UI_LAYOUT`.
+- `scene.json`: 17 static layers (14 GIFs, character hitbox, menu hitbox, album cover).
+- `scripts/companion.js`: main Aemeath logic plus configurable UI skin (embedded identically in `scene.json` as aemeath origin script).
+- `models/aemeath_album_cover.json` and `materials/aemeath_album_cover.json`: square image with special media cover system texture.
+- `project.json`: previous/play/next User Shortcut properties removed.
 
-## Source and verification
-
-- `scripts/companion.js`: controller, media state and configurable UI module, fully embedded in `scene.json` on `aemeath.origin`
-- `scripts/menu-hitbox.js`: menu input events, embedded on `menu_hitbox.visible`
-- `scripts/cursor-bridge.js`: existing companion cursor events
-- `materials/aemeath_album_cover.json`, `models/aemeath_album_cover.json`: system media cover layer
-- `project.json`: the three User Shortcut properties
-- `scene.json`: three transport button layers and menu input layer; other visuals are created once by SceneScript
-
-**Live validation is essential.** The SceneScript mock verifies layer creation, metadata handling, 16 audio bars, timeline formatting, and scaling. It does **not** verify Windows input interception, user-shortcut bindings or Wallpaper Engine's internal `$mediaThumbnail` texture rendering.
-
-## Editor smoke test
-
-1. Pull master, open the wallpaper in Wallpaper Engine **Run Preview**, start a supported Windows-media-session player, confirm pixel UI bubble follows Aemeath, displays cover/title/artist and audio bars move.
-2. In Project Settings bind the new User Shortcuts. Click previous/play/next once each and confirm external player commands.
-3. Stop playback; the bubble disappears; A continues.
-4. Hold left mouse button on the character for 650ms without moving; the menu opens. Choose each of the 11 GIF names; it should display immediately.
-5. Drag the Scale slider to 0.00, 1.00, 2.00; character responds immediately; reload and verify the scale remains.
-6. Confirm single/double click and drag still work when the menu is closed. Right-click remains an unsupported Windows/SceneScript constraint.
-
-Official docs:
-- https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
-- https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/media.html
-- https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/cursor.html
-- https://docs.wallpaperengine.io/en/scene/userproperties/usershortcut.html
-
-## Further input fixes
-
-A 650ms hold sets a dedicated `menuHoldOpened` flag, and the corresponding release is ignored as a normal click (even if the mouse was held much longer). Changing scale no longer moves the menu itself. When the media provider supplies no timeline, the time readout displays `--:-- / --:--` rather than implying a valid 0:00 duration.
-
-## Audio registration fix
-
-SceneScript requires `engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16)` to be called **once at global scope**. It is now stored as `const spectrum` outside `updateMediaData()`; the per-frame UI updater only reads `spectrum.average[0..15]`. Do not move registration into any function, `init()`, or conditional block. This fixes the parser error `registerAudioBuffers can only be called from global scope`.
+Wallpaper Engine docs: https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
