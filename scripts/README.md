@@ -9,16 +9,16 @@ Media UI design: the album artwork fills the **256×256 1:1 background** with a 
 4. `media_info_shade`: dark alpha 0.60 wash across the cover
 5. `media_jacket`: sharp 128×128 album cover with rounded corners
 6. `media_spectrum_0`–`media_spectrum_63`: 64 thin neutral live audio bars below the jacket
-7. `media_title`: static 6pt text layer with a custom shader effect; titles over 12 characters scroll their whole, unchanged string through a 189px viewport. The end stays visible for 3 seconds before an immediate restart.
-8. `media_artist`: static 4pt Inter Bold text layer with the same effect; names over 18 characters scroll likewise.
+7. `media_title`: static 6pt Pretendard Bold text layer with a custom shader effect; titles over 12 characters scroll their whole, unchanged string through a 189px viewport. The end stays visible for 3 seconds before an immediate restart.
+8. `media_artist`: static 4pt Pretendard Bold text layer with the same effect; names over 18 characters scroll likewise.
 9. `media_progress_back` and `media_progress_fill`: 189×5
-10. `media_time_current` and `media_time_total`: 3pt Inter Bold at native 1× layer scale
+10. `media_time_current` and `media_time_total`: 3pt Pretendard Bold at native 1× layer scale
 
 Before playback, character movement uses only the character's own dimensions. Starting music clamps its height to reserve room for the full bubble and border plus a 40px top margin, including at 0–2× scale; the bubble's horizontal position is clamped independently near the left and right screen edges. The title, artist, spectrum and progress/time fit inside the card without a second information panel.
 
 The look-and-feel can be adjusted by changing `UI_STYLE` and `UI_LAYOUT` inside `scripts/companion.js`, separately from character and media state logic. The `scene.json` Aemeath Origin script embeds an identical controller copy.
 
-Experimental marquee: `effects/aemeath_marquee/effect.json` samples the complete text texture at an animated horizontal offset and clips output to 189px, beginning after the text layers' 32px horizontal padding. The text string no longer changes once per character. The effect's material property is `Scroll` (the shader uniform is `u_Scroll`); `scene.json` stores its initial value under `constantshadervalues.Scroll`. SceneScript does not expose measured glyph width; scroll distance is still estimated from character count. Confirm the scrolling edge and the true end position in Run Preview. The static text layers must keep their effect, 32px padding and 2048px source width; clipping is done in the effect, not via `maxwidth`. The bundled Inter Bold font (`fonts/Inter-Bold.ttf`) is licensed under `fonts/OFL-Inter.txt`; time and artist point sizes and 1× scales are unchanged.
+Experimental marquee: `effects/aemeath_marquee/effect.json` samples the complete text texture at an animated horizontal offset and clips output to 189px, beginning after the text layers' 32px horizontal padding. The text string no longer changes once per character. The effect's material property is `Scroll` (the shader uniform is `u_Scroll`); `scene.json` stores its initial value under `constantshadervalues.Scroll`. SceneScript does not expose measured glyph width; scroll distance is still estimated from character count. Confirm the scrolling edge and the true end position in Run Preview. The static text layers must keep their effect, 32px padding and 2048px source width; clipping is done in the effect, not via `maxwidth`. Menu uses `fonts/Pretendard-Regular.ttf`, while title, artist and times use `fonts/Pretendard-Bold.ttf`; both fonts are distributed under `fonts/OFL-Pretendard.txt`. Existing point sizes and 1× scales are unchanged.
 
 ## Album art requirements
 

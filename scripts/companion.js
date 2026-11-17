@@ -7,7 +7,8 @@ const NAMES = ['aemeath','drag','idle1','idle2','idle3','idle4','move',
 const IDLES = ['idle1','idle2','idle3','idle4'];
 const SCREENS = ['screen1','screen2','screen3','screen4','screen5','screen6','screen7'];
 const STORAGE_KEY = 'aemeath.companion.v1';
-const MEDIA_BOLD_FONT = engine.registerAsset('fonts/Inter-Bold.ttf');
+const UI_FONT = engine.registerAsset('fonts/Pretendard-Regular.ttf');
+const MEDIA_BOLD_FONT = engine.registerAsset('fonts/Pretendard-Bold.ttf');
 const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
@@ -562,7 +563,7 @@ function makeText(name, initial, pt, maxwidth, color, alignment, font) {
         horizontalalign: alignment || 'left', verticalalign: 'center',
         origin: '0 0 0', scale: '1 1 1', visible: false
     };
-    if (font) data.font = font;
+    data.font = font || UI_FONT;
     const layer = thisScene.createLayer(data);
     ui[name] = layer;
     return layer;
