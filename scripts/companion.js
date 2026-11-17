@@ -23,6 +23,7 @@ let x = 960, y = 540, facing = 1;
 let mode = 'A', action = 'idle';
 let idleName = 'idle1', screenName = 'screen1';
 let musicPlaying = false;
+let playbackPoseHeld = false;
 let falling = false, fallSpeed = 0;
 let target = null;
 let actionDelay = 3;
@@ -58,10 +59,9 @@ function clamp(value, min, max) {
 }
 
 function stayOnScreen() {
-    const size = bounds();
-    const half = canvasHalfSize();
-    x = clamp(x, half, size.width - half);
-    y = clamp(y, half, size.height - half);
+    const area = movementBounds();
+    x = clamp(x, area.minX, area.maxX);
+    y = clamp(y, area.minY, area.maxY);
 }
 
 function persist() {
@@ -78,17 +78,17 @@ function setIdle(change) {
 }
 
 function beginWalk() {
-    const size = bounds();
+    const area = movementBounds();
     const cursor = input.cursorWorldPosition;
-    let tx = random(HALF_SIZE, size.width - HALF_SIZE);
-    let ty = random(HALF_SIZE, size.height - HALF_SIZE);
+    let tx = random(area.minX, area.maxX);
+    let ty = random(area.minY, area.maxY);
 
     // Sometimes follow a nearby cursor, otherwise roam freely in both axes.
     if (cursor && Math.random() < 0.25) {
         const dx = cursor.x - x, dy = cursor.y - y;
         if (dx * dx + dy * dy < 260 * 260) {
-            tx = clamp(cursor.x, HALF_SIZE, size.width - HALF_SIZE);
-            ty = clamp(cursor.y, HALF_SIZE, size.height - HALF_SIZE);
+            tx = clamp(cursor.x, area.minX, area.maxX);
+            ty = clamp(cursor.y, area.minY, area.maxY);
         }
     }
     if (Math.abs(tx - x) < 15 && Math.abs(ty - y) < 15) {
@@ -214,6 +214,7 @@ function processEvents() {
     for (let i = 0; i < events.length; i++) {
         const ev = events[i];
         if (ev.type === 'down') {
+            playbackPoseHeld = false;
             if (pointerPressed) {
                 if (ev.at - pointerDownTime < 35) continue;
                 releaseGrab();
@@ -284,7 +285,7 @@ function stepA(dt) {
             return;
         }
     }
-    if (musicPlaying || menuOpen || manualVisual) return;
+    if (musicPlaying || playbackPoseHeld || menuOpen || manualVisual) return;
     if (action === 'move' && target) {
         const dx = target.x - x, dy = target.y - y;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -337,7 +338,7 @@ function stepB(dt) {
 }
 
 function render() {
-    const active = musicPlaying ? 'aemeath'
+    const active = musicPlaying || playbackPoseHeld ? 'aemeath'
         : manualVisual ? manualVisual
         : mode === 'B' ? screenName
         : dragging ? 'drag'
@@ -455,6 +456,7 @@ export function mediaPlaybackChanged(event) {
     if (playing === musicPlaying) return;
     musicPlaying = playing;
     if (playing) {
+        playbackPoseHeld = false;
         menuOpen = false;
         manualVisual = null;
         if (mode === 'B') setMode('A');
@@ -462,11 +464,11 @@ export function mediaPlaybackChanged(event) {
         pointerPressed = false;
         resetClickSequence();
         setIdle(false);
+        stayOnScreen();
         persist();
     } else {
-        // Media ends or pauses: remain in A and resume regular behavior.
+        playbackPoseHeld = true;
         resetClickSequence();
-        setIdle(true);
         persist();
     }
     render();
@@ -475,7 +477,7 @@ export function mediaPlaybackChanged(event) {
 export function mediaStatusChanged(event) {
     if (!event.enabled && musicPlaying) {
         musicPlaying = false;
-        setIdle(true);
+        playbackPoseHeld = true;
         persist();
         render();
     }
@@ -496,13 +498,11 @@ const UI_STYLE = {
     highlight: "0.26 0.29 0.41"
 };
 const UI_LAYOUT = {
-    // Square album-cover speech bubble. All text and the timeline OVERLAY the art.
-    // Swap this skin without modifying media playback or companion behavior.
     mediaW: 256, mediaH: 256,
-    infoShadeH: 142, infoShadeY: -57,
-    titleY: -14, artistY: -42,
-    progressWidth: 222, progressY: -85,
-    clockY: -109, spectrumBaseY: 82,
+    jacketY: 56,
+    titleY: -58, artistY: -76,
+    progressWidth: 189, progressY: -98,
+    clockY: -114, spectrumY: -24,
     menuW: 252, menuH: 348,
     rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
 };
@@ -516,15 +516,22 @@ let mediaCenterX = 960, mediaCenterY = 540;
 let ui = {};
 let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
+let titleScroll = 0, artistScroll = 0;
+let titleOffset = 0, artistOffset = 0;
 let mediaAlbum = '', mediaHasArt = false;
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
-// Must be declared at SceneScript global scope, not inside updateMediaData().
-// Reuse the registered buffer in every frame; never register it during update.
-const spectrum = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
-let levels = new Array(16).fill(0);
-
+const audioBuffers = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_64);
 function canvasHalfSize() {
     return Math.max(0, 100 * sizeMultiplier);
+}
+function movementBounds() {
+    const size = bounds();
+    const half = canvasHalfSize();
+    const top = musicPlaying ? half + UI_LAYOUT.mediaH/2 + 24 + 264/2 + 40 : half;
+    return {
+        minX: half, maxX: Math.max(half, size.width - half),
+        minY: half, maxY: Math.max(half, size.height - top)
+    };
 }
 function fmtTime(seconds) {
     if (!(seconds >= 0) || !isFinite(seconds)) return '--:--';
@@ -548,7 +555,6 @@ function makeBlock(name, w, h, color, opacity) {
     return layer;
 }
 function makeText(name, initial, pt, maxwidth, color, alignment) {
-    // Text fields use a shared type scale; content column is left aligned.
     const layer = thisScene.createLayer({
         name: name, text: initial, pointsize: pt,
         color: color || UI_STYLE.text, maxwidth: maxwidth,
@@ -562,8 +568,8 @@ function makeText(name, initial, pt, maxwidth, color, alignment) {
 function initUi() {
     if (uiReady) return;
     uiReady = true;
-    // LAYER ORDER (back -> front): border, fallback, album artwork,
-    // translucent reading shade, song text, timeline and frequency spectrum.
+    // LAYER ORDER (back -> front): border, fallback, blurred artwork,
+    // dark wash, rounded inset jacket, spectrum, song text and timeline.
     makeBlock('media_outer', 264, 264, UI_STYLE.border);
     makeBlock('media_cover_empty', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.panel);
     const cover = thisScene.getLayer('media_album_cover');
@@ -571,16 +577,19 @@ function initUi() {
     if (cover && fallback)
         thisScene.sortLayer(cover, thisScene.getLayerIndex(fallback) + 1);
     makeBlock('media_info_shade', UI_LAYOUT.mediaW,
-        UI_LAYOUT.infoShadeH, UI_STYLE.background, 0.84);
+        UI_LAYOUT.mediaH, UI_STYLE.background, 0.60);
+    const jacket = thisScene.getLayer('media_jacket');
+    if (jacket)
+        thisScene.sortLayer(jacket, thisScene.getLayerIndex(ui.media_info_shade) + 1);
     makeBlock('media_tail', 20, 12, UI_STYLE.border);
-    makeText('media_title', mediaTitle, 18, 222, UI_STYLE.text, 'left');
-    makeText('media_artist', mediaArtist, 13, 222, UI_STYLE.text, 'left');
-    makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 6, UI_STYLE.highlight);
-    makeBlock('media_progress_fill', 1, 6, UI_STYLE.accent);
-    makeText('media_time_current', '--:--', 11, 80, UI_STYLE.text, 'left');
-    makeText('media_time_total', '--:--', 11, 80, UI_STYLE.text, 'right');
-    for (let i = 0; i < 16; i++)
-        makeBlock('media_band_' + i, 7, 3, UI_STYLE.accent);
+    for (let i = 0; i < 64; i++)
+        makeBlock('media_spectrum_' + i, 1, 2, '1 1 1', 0.78);
+    makeText('media_title', mediaTitle, 6, 189, UI_STYLE.text, 'left');
+    makeText('media_artist', mediaArtist, 4, 189, UI_STYLE.text, 'left');
+    makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 5, UI_STYLE.highlight);
+    makeBlock('media_progress_fill', 1, 5, '1 1 1');
+    makeText('media_time_current', '--:--', 3, 68, UI_STYLE.text, 'left');
+    makeText('media_time_total', '--:--', 3, 68, UI_STYLE.text, 'right');
     makeBlock('menu_outer', 258, 354, UI_STYLE.border);
     makeBlock('menu_inner', 252, 348, UI_STYLE.background);
     makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
@@ -614,14 +623,12 @@ function showMenu() {
 function updateUiGeometry() {
     if (!uiReady) return;
     const size = bounds();
-    // The jacket is the square background of the ENTIRE bubble.
-    // Constrain the entire square, keeping typography and progress aligned.
     mediaCenterX = clamp(x, UI_LAYOUT.mediaW/2 + 8,
         size.width - UI_LAYOUT.mediaW/2 - 8);
     mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 24,
         UI_LAYOUT.mediaH/2 + 8, size.height - UI_LAYOUT.mediaH/2 - 8);
     const mx = mediaCenterX, my = mediaCenterY;
-    const bubble = musicPlaying;
+    const bubble = musicPlaying || playbackPoseHeld;
     const place = (name,ox,oy,visible) => {
         const layer = ui[name]; if (!layer) return;
         layer.visible = visible;
@@ -631,14 +638,20 @@ function updateUiGeometry() {
     place('media_cover_empty', 0, 0, bubble);
     const cover = thisScene.getLayer('media_album_cover');
     if (cover) {
-        cover.visible = bubble;
-        if (bubble) uiPosition(cover, mx, my);
+        cover.visible = bubble && mediaHasArt;
+        if (cover.visible) uiPosition(cover, mx, my);
     }
-    // Dark translucent scrim is ABOVE the jacket, not beside it.
-    place('media_info_shade', 0, UI_LAYOUT.infoShadeY, bubble);
+    place('media_info_shade', 0, 0, bubble);
+    const jacket = thisScene.getLayer('media_jacket');
+    if (jacket) {
+        jacket.visible = bubble && mediaHasArt;
+        if (jacket.visible) uiPosition(jacket, mx, my + UI_LAYOUT.jacketY);
+    }
     place('media_tail', clamp(x-mx,-92,92), -134, bubble);
-    place('media_title', 0, UI_LAYOUT.titleY, bubble);
-    place('media_artist', 0, UI_LAYOUT.artistY, bubble);
+    for (let i = 0; i < 64; i++)
+        place('media_spectrum_' + i, (i - 31.5) * 3, UI_LAYOUT.spectrumY, bubble);
+    place('media_title', -UI_LAYOUT.progressWidth/2 - titleOffset, UI_LAYOUT.titleY, bubble);
+    place('media_artist', -UI_LAYOUT.progressWidth/2 - artistOffset, UI_LAYOUT.artistY, bubble);
     place('media_progress_back', 0, UI_LAYOUT.progressY, bubble);
     const progress = ui.media_progress_fill;
     const fraction = mediaDuration > 0 ?
@@ -647,24 +660,13 @@ function updateUiGeometry() {
         progress.visible = bubble;
         if (bubble) {
             const width = Math.max(1, UI_LAYOUT.progressWidth * fraction);
-            progress.size = new Vec2(width, 6);
+            progress.size = new Vec2(width, 5);
             uiPosition(progress, mx - UI_LAYOUT.progressWidth/2 + width/2,
                 my + UI_LAYOUT.progressY);
         }
     }
-    place('media_time_current', -69, UI_LAYOUT.clockY, bubble);
-    place('media_time_total', 69, UI_LAYOUT.clockY, bubble);
-    // Small spectrum floats in the artwork's upper region.
-    for (let i=0; i<16; i++) {
-        const bar=ui['media_band_'+i]; if (!bar) continue;
-        bar.visible=bubble;
-        if (bubble) {
-            const height=3 + Math.round(levels[i]*26);
-            bar.scale=new Vec3(1,height/3,1);
-            uiPosition(bar, mx - 99 + i*13.2,
-                my + UI_LAYOUT.spectrumBaseY + height/2);
-        }
-    }
+    place('media_time_current', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.clockY, bubble);
+    place('media_time_total', UI_LAYOUT.progressWidth/2, UI_LAYOUT.clockY, bubble);
     // Menu is detached from the skin and built from named reusable components.
     menuCenterX = menuAnchorX;
     menuCenterY = menuAnchorY;
@@ -693,25 +695,45 @@ function updateUiGeometry() {
     const menuHit=thisScene.getLayer('menu_hitbox');
     if(menuHit){menuHit.visible=menuOpen;if(menuOpen)uiPosition(menuHit,cx,cy);}
 }
+function marquee(name, value, windowSize, stepWidth, clock, dt) {
+    const chars = Array.from(value);
+    if (chars.length <= windowSize) {
+        ui[name].text = value;
+        return {clock: 0, offset: 0};
+    }
+    const steps = chars.length - windowSize;
+    const travel = steps * 0.35;
+    const cycle = 1 + travel + 3;
+    if (musicPlaying) clock = (clock + dt) % cycle;
+    const position = clamp((clock - 1) / 0.35, 0, steps);
+    const start = Math.min(Math.floor(position), steps - 1);
+    ui[name].text = chars.slice(start, start + windowSize + 1).join('');
+    return {clock: clock, offset: (position - start) * stepWidth};
+}
 function updateMediaData(dt) {
     if (musicPlaying && mediaTimelineAt>=0 && mediaDuration>0)
         mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
     if (ui.media_title) {
-        ui.media_title.text=mediaTitle || 'Unknown track';
-        ui.media_artist.text = mediaArtist || 'Unknown artist';
+        const title = marquee('media_title', mediaTitle || 'Unknown track',
+            12, 12, titleScroll, dt);
+        titleScroll = title.clock;
+        titleOffset = title.offset;
+        const artist = marquee('media_artist', mediaArtist || 'Unknown artist',
+            18, 8, artistScroll, dt);
+        artistScroll = artist.clock;
+        artistOffset = artist.offset;
         ui.media_time_current.text = mediaTimelineAt < 0 ?
             '--:--' : fmtTime(mediaPosition);
         ui.media_time_total.text = mediaDuration > 0 ?
             fmtTime(mediaDuration) : '--:--';
         ui.menu_scale_label.text = 'SCALE '+sizeMultiplier.toFixed(2)+'x';
     }
-
-    if (spectrum && spectrum.average) {
-        for(let i=0;i<16;i++){
-            const raw=Math.max(0,Math.min(1,Number(spectrum.average[i])||0));
-            const value=musicPlaying ? Math.sqrt(raw) : 0;
-            levels[i] += (value-levels[i]) * Math.min(1,dt*16);
-        }
+    for (let i = 0; i < 64; i++) {
+        const bar = ui['media_spectrum_' + i];
+        if (!bar) continue;
+        const level = audioBuffers ? Math.min(1, Math.max(0, audioBuffers.average[i] || 0)) : 0;
+        const height = musicPlaying ? 2 + 16 * level : 2;
+        bar.size = new Vec2(1, height);
     }
 }
 function updateMenuSlider(mouseX) {
@@ -769,8 +791,11 @@ function handleContextHold() {
 }
 
 export function mediaPropertiesChanged(event) {
+    if (playbackPoseHeld) return;
     mediaTitle = event.title || 'Unknown track';
+    titleScroll = 0;
     mediaArtist = event.artist || 'Unknown artist';
+    artistScroll = 0;
     mediaAlbum = event.albumTitle || '';
     // New song metadata arrives before its optional new timeline.
     mediaPosition=0; mediaDuration=0; mediaTimelineAt=-1;
@@ -779,6 +804,7 @@ export function mediaThumbnailChanged(event) {
     mediaHasArt = !!event.hasThumbnail;
 }
 export function mediaTimelineChanged(event) {
+    if (playbackPoseHeld) return;
     if (typeof event.position === 'number' && isFinite(event.position))
         mediaPosition = Math.max(0,event.position);
     if (typeof event.duration === 'number' && isFinite(event.duration))
