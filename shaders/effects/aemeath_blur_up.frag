@@ -6,13 +6,13 @@ varying vec2 v_TexCoord;
 
 // Dual Kawase upsample: eight surrounding taps, normalized to 1.0.
 vec4 sampleClamped(vec2 uv) {
-    vec2 halfPixel = 0.5 / max(g_Texture0Resolution.xy, vec2(1.0));
-    return texSample2D(g_Texture0, clamp(uv, halfPixel, vec2(1.0) - halfPixel));
+    vec2 halfPixel = 0.5 / max(g_Texture0Resolution.xy, vec2(1.0, 1.0));
+    return texSample2D(g_Texture0, clamp(uv, halfPixel, vec2(1.0, 1.0) - halfPixel));
 }
 
 void main() {
-    vec2 stepUV = 1.5 / max(g_Texture0Resolution.xy, vec2(1.0));
-    vec4 sum = vec4(0.0);
+    vec2 stepUV = 1.5 / max(g_Texture0Resolution.xy, vec2(1.0, 1.0));
+    vec4 sum = vec4(0.0, 0.0, 0.0, 0.0);
     sum += sampleClamped(v_TexCoord + vec2(-stepUV.x, 0.0)) * 2.0;
     sum += sampleClamped(v_TexCoord + vec2( stepUV.x, 0.0)) * 2.0;
     sum += sampleClamped(v_TexCoord + vec2(0.0, -stepUV.y)) * 2.0;

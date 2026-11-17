@@ -44,3 +44,7 @@ Docs: https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
 - The old 60% `media_info_shade` is visible only when the media thumbnail is missing, preventing an unwanted second dark overlay on the artwork.
 
 **Editor validation:** Open branch `blur` with the Wallpaper Engine editor, start playback with several bright/dark album covers, verify the blur/gradient/animated tint and a sharp jacket. Stop or switch tracks, check the fallback. Inspect the Log for missing shader/material/FBO errors. The effect JSON and SceneScript have been structurally checked, but the GPU effect still requires a real Wallpaper Engine Run Preview (unavailable from the repository).
+
+### Shader compiler compatibility
+
+On Windows, Wallpaper Engine cross-compiles GLSL-style shaders to HLSL. Keep vector constructor arguments explicit (for example, `vec2(1.0, 1.0)` instead of `vec2(1.0)`, and `vec4(0.0, 0.0, 0.0, 0.0)` instead of `vec4(0.0)`) to avoid HLSL X3014. Each of the three fragment shader names requires a matching `.vert` containing `main()`; the new up/down vertex shaders reuse the existing full-screen UV transform. If editing shaders again, test all three programs with Run Preview.

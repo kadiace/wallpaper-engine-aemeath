@@ -66,6 +66,8 @@
     "shaders/effects/aemeath_blur_down.frag",
     "shaders/effects/aemeath_blur_up.frag",
     "shaders/effects/aemeath_blur.frag",
-    "shaders/effects/aemeath_blur.vert"
+    "shaders/effects/aemeath_blur.vert",
+    "shaders/effects/aemeath_blur_down.vert",
+    "shaders/effects/aemeath_blur_up.vert"
   ]
 }
