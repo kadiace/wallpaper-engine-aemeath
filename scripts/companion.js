@@ -7,6 +7,7 @@ const NAMES = ['aemeath','drag','idle1','idle2','idle3','idle4','move',
 const IDLES = ['idle1','idle2','idle3','idle4'];
 const SCREENS = ['screen1','screen2','screen3','screen4','screen5','screen6','screen7'];
 const STORAGE_KEY = 'aemeath.companion.v1';
+const MEDIA_BOLD_FONT = engine.registerAsset('fonts/Inter-Bold.ttf');
 const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
@@ -499,10 +500,10 @@ const UI_STYLE = {
 };
 const UI_LAYOUT = {
     mediaW: 256, mediaH: 256,
-    jacketY: 56,
-    titleY: -58, artistY: -76,
-    progressWidth: 189, progressY: -98,
-    clockY: -114, spectrumY: -24,
+    jacketY: 52,
+    titleY: -48, artistY: -70,
+    progressWidth: 189, progressY: -92,
+    clockY: -106, spectrumY: -28,
     menuW: 252, menuH: 348,
     rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
 };
@@ -517,7 +518,6 @@ let ui = {};
 let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
 let titleScroll = 0, artistScroll = 0;
-let titleOffset = 0, artistOffset = 0;
 let mediaAlbum = '', mediaHasArt = false;
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
 const audioBuffers = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_64);
@@ -554,14 +554,16 @@ function makeBlock(name, w, h, color, opacity) {
     ui[name] = layer;
     return layer;
 }
-function makeText(name, initial, pt, maxwidth, color, alignment) {
-    const layer = thisScene.createLayer({
+function makeText(name, initial, pt, maxwidth, color, alignment, font) {
+    const data = {
         name: name, text: initial, pointsize: pt,
         color: color || UI_STYLE.text, maxwidth: maxwidth,
         limitwidth: true, limitrows: true, maxrows: 1,
         horizontalalign: alignment || 'left', verticalalign: 'center',
         origin: '0 0 0', scale: '1 1 1', visible: false
-    });
+    };
+    if (font) data.font = font;
+    const layer = thisScene.createLayer(data);
     ui[name] = layer;
     return layer;
 }
@@ -584,12 +586,14 @@ function initUi() {
     makeBlock('media_tail', 20, 12, UI_STYLE.border);
     for (let i = 0; i < 64; i++)
         makeBlock('media_spectrum_' + i, 1, 2, '1 1 1', 0.78);
-    makeText('media_title', mediaTitle, 6, 189, UI_STYLE.text, 'left');
-    makeText('media_artist', mediaArtist, 4, 189, UI_STYLE.text, 'left');
+    ui.media_title = thisScene.getLayer('media_title');
+    ui.media_artist = thisScene.getLayer('media_artist');
+    thisScene.sortLayer(ui.media_title, thisScene.getLayerIndex(ui.media_spectrum_63) + 1);
+    thisScene.sortLayer(ui.media_artist, thisScene.getLayerIndex(ui.media_title) + 1);
     makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 5, UI_STYLE.highlight);
     makeBlock('media_progress_fill', 1, 5, '1 1 1');
-    makeText('media_time_current', '--:--', 3, 68, UI_STYLE.text, 'left');
-    makeText('media_time_total', '--:--', 3, 68, UI_STYLE.text, 'right');
+    makeText('media_time_current', '--:--', 3, 68, UI_STYLE.text, 'left', MEDIA_BOLD_FONT);
+    makeText('media_time_total', '--:--', 3, 68, UI_STYLE.text, 'right', MEDIA_BOLD_FONT);
     makeBlock('menu_outer', 258, 354, UI_STYLE.border);
     makeBlock('menu_inner', 252, 348, UI_STYLE.background);
     makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
@@ -650,8 +654,8 @@ function updateUiGeometry() {
     place('media_tail', clamp(x-mx,-92,92), -134, bubble);
     for (let i = 0; i < 64; i++)
         place('media_spectrum_' + i, (i - 31.5) * 3, UI_LAYOUT.spectrumY, bubble);
-    place('media_title', -UI_LAYOUT.progressWidth/2 - titleOffset, UI_LAYOUT.titleY, bubble);
-    place('media_artist', -UI_LAYOUT.progressWidth/2 - artistOffset, UI_LAYOUT.artistY, bubble);
+    place('media_title', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.titleY, bubble);
+    place('media_artist', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.artistY, bubble);
     place('media_progress_back', 0, UI_LAYOUT.progressY, bubble);
     const progress = ui.media_progress_fill;
     const fraction = mediaDuration > 0 ?
@@ -696,32 +700,25 @@ function updateUiGeometry() {
     if(menuHit){menuHit.visible=menuOpen;if(menuOpen)uiPosition(menuHit,cx,cy);}
 }
 function marquee(name, value, windowSize, stepWidth, clock, dt) {
-    const chars = Array.from(value);
-    if (chars.length <= windowSize) {
-        ui[name].text = value;
-        return {clock: 0, offset: 0};
-    }
-    const steps = chars.length - windowSize;
+    const layer = ui[name];
+    if (layer.text !== value) layer.text = value;
+    const steps = Math.max(0, Array.from(value).length - windowSize);
     const travel = steps * 0.35;
-    const cycle = 1 + travel + 3;
-    if (musicPlaying) clock = (clock + dt) % cycle;
-    const position = clamp((clock - 1) / 0.35, 0, steps);
-    const start = Math.min(Math.floor(position), steps - 1);
-    ui[name].text = chars.slice(start, start + windowSize + 1).join('');
-    return {clock: clock, offset: (position - start) * stepWidth};
+    if ((musicPlaying || playbackPoseHeld) && steps > 0)
+        clock = (clock + dt) % (1 + travel + 3);
+    if (!steps) clock = 0;
+    const offset = clamp((clock - 1) / 0.35, 0, steps) * stepWidth;
+    layer.getEffect(0).setMaterialProperty('Scroll', offset);
+    return clock;
 }
 function updateMediaData(dt) {
     if (musicPlaying && mediaTimelineAt>=0 && mediaDuration>0)
         mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
     if (ui.media_title) {
-        const title = marquee('media_title', mediaTitle || 'Unknown track',
+        titleScroll = marquee('media_title', mediaTitle || 'Unknown track',
             12, 12, titleScroll, dt);
-        titleScroll = title.clock;
-        titleOffset = title.offset;
-        const artist = marquee('media_artist', mediaArtist || 'Unknown artist',
+        artistScroll = marquee('media_artist', mediaArtist || 'Unknown artist',
             18, 8, artistScroll, dt);
-        artistScroll = artist.clock;
-        artistOffset = artist.offset;
         ui.media_time_current.text = mediaTimelineAt < 0 ?
             '--:--' : fmtTime(mediaPosition);
         ui.media_time_total.text = mediaDuration > 0 ?
