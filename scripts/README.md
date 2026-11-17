@@ -1,11 +1,11 @@
 # Aemeath — square album-art bubble
 
-Media UI design: the album artwork fills the **256×256 1:1 background** with a 4-pass dual Kawase blur, album-tint grading and top-to-bottom dark gradient. A separate, unblurred **128×128 rounded square** jacket sits near the top center. The final blur pass shades the lower card more heavily for text legibility.
+Media UI design: the album artwork fills the **256×256 1:1 background** with a single-pass 7×7 Gaussian blur, album-tint grading and top-to-bottom dark gradient. A separate, unblurred **128×128 rounded square** jacket sits near the top center. The blur shader shades the lower card more heavily for text legibility.
 
 ## Media bubble layer order (back -> front)
 1. `media_outer`: pixel border, 264×264
 2. `media_cover_empty`: square fallback background, 256×256
-3. `media_album_cover`: blurred Windows media cover texture, 256×256, 1:1; half/quarter-resolution dual Kawase blur with tint, saturation, grain and vertical gradient
+3. `media_album_cover`: blurred Windows media cover texture, 256×256, 1:1; direct 7×7 Gaussian blur with tint, saturation and vertical gradient
 4. `media_info_shade`: dark alpha 0.60 wash for **missing-thumbnail fallback only**; artwork shading is handled in the blur's last pass
 5. `media_jacket`: sharp 128×128 album cover with rounded corners
 6. `media_spectrum_0`–`media_spectrum_63`: 64 thin neutral live audio bars below the jacket
@@ -37,14 +37,12 @@ Docs: https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
 
 ## Background blur (branch `blur`)
 
-- `effects/aemeath_blur/effect.json` uses four passes: 256→128 downsample, 128→64 downsample, 64→128 upsample and 128→256 final upsample/color grade. It allocates two half-resolution and one quarter-resolution framebuffers (`scale: 2` and `3`).
-- `shaders/effects/aemeath_blur_down.frag` and `aemeath_blur_up.frag` use a normalized, edge-clamped dual Kawase kernel; `aemeath_blur.frag` performs the last upsample plus color grading in one pass. The front `media_jacket` retains its separate rounded-corner effect and no blur.
-- The final shader exposes `AlbumTint` (default RGB `0.13 0.14 0.20`), `TintStrength` (0.16), `Saturation` (1.1), `TopShade` (0.25) and `BottomShade` (0.70). It adds a static, weak 0.008-amplitude grain to reduce banding.
-- `mediaThumbnailChanged(event)` reads the optional `primaryColor` Vec3 and smoothly interpolates the effect's `AlbumTint` material property, falling back to the neutral color if media artwork/colors disappear.
-- The old 60% `media_info_shade` is visible only when the media thumbnail is missing, preventing an unwanted second dark overlay on the artwork.
+The former four-pass dual Kawase prototype rendered a black square on actual Wallpaper Engine despite compiling. Its framebuffer dependency chain was not verified at runtime, so it has been removed instead of risking another black intermediate target.
 
-**Editor validation:** Open branch `blur` with the Wallpaper Engine editor, start playback with several bright/dark album covers, verify the blur/gradient/animated tint and a sharp jacket. Stop or switch tracks, check the fallback. Inspect the Log for missing shader/material/FBO errors. The effect JSON and SceneScript have been structurally checked, but the GPU effect still requires a real Wallpaper Engine Run Preview (unavailable from the repository).
+- `effects/aemeath_blur/effect.json` now uses **one pass** and explicitly binds `previous` (the source image texture) to sampler 0; there are no intermediate `fbos`.
+- `shaders/effects/aemeath_blur.frag` computes a normalized 7×7 (49-tap) binomial Gaussian blur directly from `$mediaThumbnail`, with offsets in 256×256 card coordinates. The Gaussian weights sum to 4096, preserving the original average brightness. UVs clamp to the image edges.
+- The background uses `gl_FragColor.a = 1.0` so even an unexpected thumbnail alpha of 0 cannot make the entire blurred layer vanish. `media_jacket` remains sharp, with its existing rounded-corner effect.
+- `AlbumTint` (0.13 0.14 0.20), `TintStrength` (0.16), `Saturation` (1.1), `TopShade` (0.25) and `BottomShade` (0.70) remain adjustable on the one effect pass. The existing script animates the color from `mediaThumbnailChanged(event).primaryColor`.
+- The fallback's separate 60%-opacity `media_info_shade` appears only when artwork is unavailable; the artwork gradient is produced inside the blur shader.
 
-### Shader compiler compatibility
-
-On Windows, Wallpaper Engine cross-compiles GLSL-style shaders to HLSL. Keep vector constructor arguments explicit (for example, `vec2(1.0, 1.0)` instead of `vec2(1.0)`, and `vec4(0.0, 0.0, 0.0, 0.0)` instead of `vec4(0.0)`) to avoid HLSL X3014. Each of the three fragment shader names requires a matching `.vert` containing `main()`; the new up/down vertex shaders reuse the existing full-screen UV transform. If editing shaders again, test all three programs with Run Preview.
+**Validation:** The JSON effect and scene are parsed, verified for a single pass, correct sampler binding, and matching shader dependencies. To verify GPU output, start Run Preview on branch `blur`, play music with a known non-black thumbnail, and confirm the 256×256 background is colorful and blurry while the 128×128 jacket stays sharp. The GPU runtime is not available through GitHub.

@@ -232,16 +232,6 @@
 					"passes" : 
 					[
 						{
-							"id" : 72
-						},
-						{
-							"id" : 90
-						},
-						{
-							"id" : 91
-						},
-						{
-							"id" : 92,
 							"constantshadervalues" : 
 							{
 								"AlbumTint" : "0.13 0.14 0.20",
@@ -249,7 +239,8 @@
 								"Saturation" : 1.1,
 								"TopShade" : 0.25,
 								"BottomShade" : 0.7
-							}
+							},
+							"id" : 72
 						}
 					],
 					"visible" : true
