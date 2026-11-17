@@ -8,6 +8,9 @@
       "depthwrite": "disabled",
       "shader": "genericimage4",
       "textures": [
+        "$mediaThumbnail"
+      ],
+      "usertextures": [
         {
           "name": "$mediaThumbnail",
           "type": "system"

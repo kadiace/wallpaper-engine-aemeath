@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "Aemeath rounded jacket",
+  "passes": [{
+    "material": "materials/effects/aemeath_round.json",
+    "bind": [{"name": "previous", "index": 0}]
+  }],
+  "dependencies": [
+    "materials/effects/aemeath_round.json",
+    "shaders/effects/aemeath_round.frag",
+    "shaders/effects/aemeath_round.vert"
+  ]
+}

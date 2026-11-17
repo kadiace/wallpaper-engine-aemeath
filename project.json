@@ -4,27 +4,6 @@
 	{
 		"properties" : 
 		{
-			"aemeath_next" : 
-			{
-				"order" : 12,
-				"text" : "Next track",
-				"type" : "usershortcut",
-				"value" : ""
-			},
-			"aemeath_playpause" : 
-			{
-				"order" : 11,
-				"text" : "Play / Pause",
-				"type" : "usershortcut",
-				"value" : ""
-			},
-			"aemeath_previous" : 
-			{
-				"order" : 10,
-				"text" : "Previous track",
-				"type" : "usershortcut",
-				"value" : ""
-			},
 			"schemecolor" : 
 			{
 				"order" : 0,
@@ -33,7 +12,9 @@
 				"value" : "0 0 0"
 			}
 		},
-		"supportsaudioprocessing" : true
+		"supportsaudioprocessing" : true,
+		"supportsvideo" : true,
+		"supportsvideoflags" : 2
 	},
 	"preview" : "preview.jpg",
 	"tags" : [ "Unspecified" ],

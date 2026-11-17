@@ -7,6 +7,8 @@ const NAMES = ['aemeath','drag','idle1','idle2','idle3','idle4','move',
 const IDLES = ['idle1','idle2','idle3','idle4'];
 const SCREENS = ['screen1','screen2','screen3','screen4','screen5','screen6','screen7'];
 const STORAGE_KEY = 'aemeath.companion.v1';
+const UI_FONT = engine.registerAsset('fonts/Pretendard-Regular.ttf');
+const MEDIA_BOLD_FONT = engine.registerAsset('fonts/Pretendard-Bold.ttf');
 const HALF_SIZE = 100;
 const SPEED = 130;
 const DRAG_THRESHOLD = 7;
@@ -23,6 +25,7 @@ let x = 960, y = 540, facing = 1;
 let mode = 'A', action = 'idle';
 let idleName = 'idle1', screenName = 'screen1';
 let musicPlaying = false;
+let playbackPoseHeld = false;
 let falling = false, fallSpeed = 0;
 let target = null;
 let actionDelay = 3;
@@ -58,10 +61,9 @@ function clamp(value, min, max) {
 }
 
 function stayOnScreen() {
-    const size = bounds();
-    const half = canvasHalfSize();
-    x = clamp(x, half, size.width - half);
-    y = clamp(y, half, size.height - half);
+    const area = movementBounds();
+    x = clamp(x, area.minX, area.maxX);
+    y = clamp(y, area.minY, area.maxY);
 }
 
 function persist() {
@@ -78,17 +80,17 @@ function setIdle(change) {
 }
 
 function beginWalk() {
-    const size = bounds();
+    const area = movementBounds();
     const cursor = input.cursorWorldPosition;
-    let tx = random(HALF_SIZE, size.width - HALF_SIZE);
-    let ty = random(HALF_SIZE, size.height - HALF_SIZE);
+    let tx = random(area.minX, area.maxX);
+    let ty = random(area.minY, area.maxY);
 
     // Sometimes follow a nearby cursor, otherwise roam freely in both axes.
     if (cursor && Math.random() < 0.25) {
         const dx = cursor.x - x, dy = cursor.y - y;
         if (dx * dx + dy * dy < 260 * 260) {
-            tx = clamp(cursor.x, HALF_SIZE, size.width - HALF_SIZE);
-            ty = clamp(cursor.y, HALF_SIZE, size.height - HALF_SIZE);
+            tx = clamp(cursor.x, area.minX, area.maxX);
+            ty = clamp(cursor.y, area.minY, area.maxY);
         }
     }
     if (Math.abs(tx - x) < 15 && Math.abs(ty - y) < 15) {
@@ -214,6 +216,7 @@ function processEvents() {
     for (let i = 0; i < events.length; i++) {
         const ev = events[i];
         if (ev.type === 'down') {
+            playbackPoseHeld = false;
             if (pointerPressed) {
                 if (ev.at - pointerDownTime < 35) continue;
                 releaseGrab();
@@ -284,7 +287,7 @@ function stepA(dt) {
             return;
         }
     }
-    if (musicPlaying || menuOpen || manualVisual) return;
+    if (musicPlaying || playbackPoseHeld || menuOpen || manualVisual) return;
     if (action === 'move' && target) {
         const dx = target.x - x, dy = target.y - y;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -337,7 +340,7 @@ function stepB(dt) {
 }
 
 function render() {
-    const active = musicPlaying ? 'aemeath'
+    const active = musicPlaying || playbackPoseHeld ? 'aemeath'
         : manualVisual ? manualVisual
         : mode === 'B' ? screenName
         : dragging ? 'drag'
@@ -454,8 +457,8 @@ export function mediaPlaybackChanged(event) {
     const playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;
     if (playing === musicPlaying) return;
     musicPlaying = playing;
-    mediaPaused = !playing;
     if (playing) {
+        playbackPoseHeld = false;
         menuOpen = false;
         manualVisual = null;
         if (mode === 'B') setMode('A');
@@ -463,11 +466,11 @@ export function mediaPlaybackChanged(event) {
         pointerPressed = false;
         resetClickSequence();
         setIdle(false);
+        stayOnScreen();
         persist();
     } else {
-        // Media ends or pauses: remain in A and resume regular behavior.
+        playbackPoseHeld = true;
         resetClickSequence();
-        setIdle(true);
         persist();
     }
     render();
@@ -476,7 +479,7 @@ export function mediaPlaybackChanged(event) {
 export function mediaStatusChanged(event) {
     if (!event.enabled && musicPlaying) {
         musicPlaying = false;
-        setIdle(true);
+        playbackPoseHeld = true;
         persist();
         render();
     }
@@ -497,7 +500,12 @@ const UI_STYLE = {
     highlight: "0.26 0.29 0.41"
 };
 const UI_LAYOUT = {
-    mediaW: 360, mediaH: 282, menuW: 252, menuH: 348,
+    mediaW: 256, mediaH: 256,
+    jacketY: 52,
+    titleY: -48, artistY: -70,
+    progressWidth: 189, progressY: -92,
+    clockY: -106, spectrumY: -28,
+    menuW: 252, menuH: 348,
     rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
 };
 const MANUAL_NAMES = ['idle1','idle2','idle3','idle4',
@@ -510,16 +518,21 @@ let mediaCenterX = 960, mediaCenterY = 540;
 let ui = {};
 let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
+let titleScroll = 0, artistScroll = 0;
 let mediaAlbum = '', mediaHasArt = false;
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
-let mediaPaused = false;
-// Must be declared at SceneScript global scope, not inside updateMediaData().
-// Reuse the registered buffer in every frame; never register it during update.
-const spectrum = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
-let levels = new Array(16).fill(0);
-
+const audioBuffers = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_64);
 function canvasHalfSize() {
     return Math.max(0, 100 * sizeMultiplier);
+}
+function movementBounds() {
+    const size = bounds();
+    const half = canvasHalfSize();
+    const top = musicPlaying ? half + UI_LAYOUT.mediaH/2 + 24 + 264/2 + 40 : half;
+    return {
+        minX: half, maxX: Math.max(half, size.width - half),
+        minY: half, maxY: Math.max(half, size.height - top)
+    };
 }
 function fmtTime(seconds) {
     if (!(seconds >= 0) || !isFinite(seconds)) return '--:--';
@@ -532,46 +545,56 @@ function uiPosition(layer, px, py) {
     if (!p || Math.abs(p.x-px) > 0.1 || Math.abs(p.y-py) > 0.1)
         layer.origin = new Vec3(px, py, 0);
 }
-function makeBlock(name, w, h, color) {
+function makeBlock(name, w, h, color, opacity) {
     const layer = thisScene.createLayer({
         name: name, image: 'models/util/solidlayer.json',
         origin: '0 0 0', size: w + ' ' + h,
-        color: color, alpha: 1, visible: false, solid: false
+        color: color, alpha: opacity === undefined ? 1 : opacity,
+        visible: false, solid: false
     });
     ui[name] = layer;
     return layer;
 }
-function makeText(name, initial, pt, maxwidth, color) {
-    // Text layer creation uses the officially documented createLayer(text) API.
-    // Text styling is independent of the companion behavior state machine.
-    const layer = thisScene.createLayer({
+function makeText(name, initial, pt, maxwidth, color, alignment, font) {
+    const data = {
         name: name, text: initial, pointsize: pt,
         color: color || UI_STYLE.text, maxwidth: maxwidth,
         limitwidth: true, limitrows: true, maxrows: 1,
-        horizontalalign: 'center', verticalalign: 'center',
+        horizontalalign: alignment || 'left', verticalalign: 'center',
         origin: '0 0 0', scale: '1 1 1', visible: false
-    });
+    };
+    data.font = font || UI_FONT;
+    const layer = thisScene.createLayer(data);
     ui[name] = layer;
     return layer;
 }
 function initUi() {
     if (uiReady) return;
     uiReady = true;
-    makeBlock('media_outer', 368, 290, UI_STYLE.border);
-    makeBlock('media_inner', 360, 282, UI_STYLE.background);
-    makeBlock('media_tail', 18, 14, UI_STYLE.border);
-    makeBlock('media_cover_frame', 100, 100, UI_STYLE.border);
-    makeBlock('media_cover_empty', 92, 92, UI_STYLE.panel);
-    makeText('media_title', mediaTitle, 16, 210);
-    makeText('media_artist', mediaArtist, 12, 210, UI_STYLE.muted);
-    makeText('media_album', '', 10, 210, UI_STYLE.muted);
-    makeBlock('media_progress_back', 295, 5, UI_STYLE.highlight);
-    makeBlock('media_progress_fill', 1, 5, UI_STYLE.accent);
-    makeText('media_clock', '--:-- / --:--', 11, 225, UI_STYLE.text);
-    makeText('media_transport_prev', '<', 20, 42);
-    makeText('media_transport_play', 'II', 18, 42);
-    makeText('media_transport_next', '>', 20, 42);
-    for (let i = 0; i < 16; i++) makeBlock('media_band_' + i, 9, 3, UI_STYLE.accent);
+    // LAYER ORDER (back -> front): border, fallback, blurred artwork,
+    // dark wash, rounded inset jacket, spectrum, song text and timeline.
+    makeBlock('media_outer', 264, 264, UI_STYLE.border);
+    makeBlock('media_cover_empty', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.panel);
+    const cover = thisScene.getLayer('media_album_cover');
+    const fallback = ui.media_cover_empty;
+    if (cover && fallback)
+        thisScene.sortLayer(cover, thisScene.getLayerIndex(fallback) + 1);
+    makeBlock('media_info_shade', UI_LAYOUT.mediaW,
+        UI_LAYOUT.mediaH, UI_STYLE.background, 0.60);
+    const jacket = thisScene.getLayer('media_jacket');
+    if (jacket)
+        thisScene.sortLayer(jacket, thisScene.getLayerIndex(ui.media_info_shade) + 1);
+    makeBlock('media_tail', 20, 12, UI_STYLE.border);
+    for (let i = 0; i < 64; i++)
+        makeBlock('media_spectrum_' + i, 1, 2, '1 1 1', 0.78);
+    ui.media_title = thisScene.getLayer('media_title');
+    ui.media_artist = thisScene.getLayer('media_artist');
+    thisScene.sortLayer(ui.media_title, thisScene.getLayerIndex(ui.media_spectrum_63) + 1);
+    thisScene.sortLayer(ui.media_artist, thisScene.getLayerIndex(ui.media_title) + 1);
+    makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 5, UI_STYLE.highlight);
+    makeBlock('media_progress_fill', 1, 5, '1 1 1');
+    makeText('media_time_current', '--:--', 3, 68, UI_STYLE.text, 'left', MEDIA_BOLD_FONT);
+    makeText('media_time_total', '--:--', 3, 68, UI_STYLE.text, 'right', MEDIA_BOLD_FONT);
     makeBlock('menu_outer', 258, 354, UI_STYLE.border);
     makeBlock('menu_inner', 252, 348, UI_STYLE.background);
     makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
@@ -605,63 +628,50 @@ function showMenu() {
 function updateUiGeometry() {
     if (!uiReady) return;
     const size = bounds();
-    // Keep the speech bubble above the character, shifted into canvas if needed.
-    mediaCenterX = clamp(x, UI_LAYOUT.mediaW / 2 + 10, size.width - UI_LAYOUT.mediaW / 2 - 10);
-    mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 22,
+    mediaCenterX = clamp(x, UI_LAYOUT.mediaW/2 + 8,
+        size.width - UI_LAYOUT.mediaW/2 - 8);
+    mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 24,
         UI_LAYOUT.mediaH/2 + 8, size.height - UI_LAYOUT.mediaH/2 - 8);
     const mx = mediaCenterX, my = mediaCenterY;
-    const bubble = musicPlaying;
-    const place = (name,ox,oy,visible)=> {
+    const bubble = musicPlaying || playbackPoseHeld;
+    const place = (name,ox,oy,visible) => {
         const layer = ui[name]; if (!layer) return;
         layer.visible = visible;
-        if (visible) uiPosition(layer, mx+ox, my+oy);
+        if (visible) uiPosition(layer, mx + ox, my + oy);
     };
-    place('media_outer',0,0,bubble);
-    place('media_inner',0,0,bubble);
-    place('media_tail',clamp(x-mx,-152,152),-148,bubble);
-    place('media_cover_frame',-120,68,bubble);
-    place('media_cover_empty',-120,68,bubble && !mediaHasArt);
+    place('media_outer', 0, 0, bubble);
+    place('media_cover_empty', 0, 0, bubble);
     const cover = thisScene.getLayer('media_album_cover');
     if (cover) {
         cover.visible = bubble && mediaHasArt;
-        if (bubble) uiPosition(cover,mx-120,my+68);
+        if (cover.visible) uiPosition(cover, mx, my);
     }
-    place('media_title',57,108,bubble);
-    place('media_artist',57,76,bubble);
-    place('media_album',57,46,bubble);
-    place('media_progress_back',0,-10,bubble);
+    place('media_info_shade', 0, 0, bubble);
+    const jacket = thisScene.getLayer('media_jacket');
+    if (jacket) {
+        jacket.visible = bubble && mediaHasArt;
+        if (jacket.visible) uiPosition(jacket, mx, my + UI_LAYOUT.jacketY);
+    }
+    place('media_tail', clamp(x-mx,-92,92), -134, bubble);
+    for (let i = 0; i < 64; i++)
+        place('media_spectrum_' + i, (i - 31.5) * 3, UI_LAYOUT.spectrumY, bubble);
+    place('media_title', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.titleY, bubble);
+    place('media_artist', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.artistY, bubble);
+    place('media_progress_back', 0, UI_LAYOUT.progressY, bubble);
     const progress = ui.media_progress_fill;
-    const pct = mediaDuration > 0 ? clamp(mediaPosition/mediaDuration,0,1):0;
-    if(progress) {
-        progress.visible=bubble;
-        if(bubble) {
-            progress.size = new Vec2(Math.max(1,295*pct),5);
-            uiPosition(progress,mx-147.5+147.5*pct,my-10);
+    const fraction = mediaDuration > 0 ?
+        clamp(mediaPosition / mediaDuration, 0, 1) : 0;
+    if (progress) {
+        progress.visible = bubble;
+        if (bubble) {
+            const width = Math.max(1, UI_LAYOUT.progressWidth * fraction);
+            progress.size = new Vec2(width, 5);
+            uiPosition(progress, mx - UI_LAYOUT.progressWidth/2 + width/2,
+                my + UI_LAYOUT.progressY);
         }
     }
-    place('media_clock',0,-32,bubble);
-    place('media_transport_prev',-78,-66,bubble);
-    place('media_transport_play',0,-66,bubble);
-    place('media_transport_next',78,-66,bubble);
-    for (let i=0;i<16;i++) {
-        const bar=ui['media_band_'+i]; if(!bar) continue;
-        bar.visible=bubble;
-        if(bubble){
-            const height=3+Math.round(levels[i]*30);
-            // Scale rather than changing the physical placeholder size every frame.
-            bar.scale=new Vec3(1,height/3,1);
-            uiPosition(bar,mx-112+i*15,my-119+height/2);
-        }
-    }
-    // Transport hitboxes are stable input layers, not tied to changing UI text.
-    const buttons=['media_btn_prev','media_btn_play','media_btn_next'];
-    const xs=[-78,0,78];
-    for(let i=0;i<buttons.length;i++){
-        const btn=thisScene.getLayer(buttons[i]);
-        if(!btn) continue;
-        btn.visible=bubble;
-        if(bubble) uiPosition(btn,mx+xs[i],my-66);
-    }
+    place('media_time_current', -UI_LAYOUT.progressWidth/2, UI_LAYOUT.clockY, bubble);
+    place('media_time_total', UI_LAYOUT.progressWidth/2, UI_LAYOUT.clockY, bubble);
     // Menu is detached from the skin and built from named reusable components.
     menuCenterX = menuAnchorX;
     menuCenterY = menuAnchorY;
@@ -690,25 +700,38 @@ function updateUiGeometry() {
     const menuHit=thisScene.getLayer('menu_hitbox');
     if(menuHit){menuHit.visible=menuOpen;if(menuOpen)uiPosition(menuHit,cx,cy);}
 }
+function marquee(name, value, windowSize, stepWidth, clock, dt) {
+    const layer = ui[name];
+    if (layer.text !== value) layer.text = value;
+    const steps = Math.max(0, Array.from(value).length - windowSize);
+    const travel = steps * 0.35;
+    if ((musicPlaying || playbackPoseHeld) && steps > 0)
+        clock = (clock + dt) % (1 + travel + 3);
+    if (!steps) clock = 0;
+    const offset = clamp((clock - 1) / 0.35, 0, steps) * stepWidth;
+    layer.getEffect(0).setMaterialProperty('Scroll', offset);
+    return clock;
+}
 function updateMediaData(dt) {
     if (musicPlaying && mediaTimelineAt>=0 && mediaDuration>0)
         mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
     if (ui.media_title) {
-        ui.media_title.text=mediaTitle || 'Unknown track';
-        ui.media_artist.text=mediaArtist || 'Unknown artist';
-        ui.media_album.text=mediaAlbum || '';
-        ui.media_clock.text=(mediaTimelineAt<0 ? '--:--' : fmtTime(mediaPosition))
-            +' / '+(mediaDuration>0 ? fmtTime(mediaDuration) : '--:--');
-        ui.media_transport_play.text=mediaPaused ? '>' : 'II';
-        ui.menu_scale_label.text='SCALE '+sizeMultiplier.toFixed(2)+'x';
+        titleScroll = marquee('media_title', mediaTitle || 'Unknown track',
+            12, 12, titleScroll, dt);
+        artistScroll = marquee('media_artist', mediaArtist || 'Unknown artist',
+            18, 8, artistScroll, dt);
+        ui.media_time_current.text = mediaTimelineAt < 0 ?
+            '--:--' : fmtTime(mediaPosition);
+        ui.media_time_total.text = mediaDuration > 0 ?
+            fmtTime(mediaDuration) : '--:--';
+        ui.menu_scale_label.text = 'SCALE '+sizeMultiplier.toFixed(2)+'x';
     }
-
-    if (spectrum && spectrum.average) {
-        for(let i=0;i<16;i++){
-            const raw=Math.max(0,Math.min(1,Number(spectrum.average[i])||0));
-            const value=musicPlaying ? Math.sqrt(raw) : 0;
-            levels[i] += (value-levels[i]) * Math.min(1,dt*16);
-        }
+    for (let i = 0; i < 64; i++) {
+        const bar = ui['media_spectrum_' + i];
+        if (!bar) continue;
+        const level = audioBuffers ? Math.min(1, Math.max(0, audioBuffers.average[i] || 0)) : 0;
+        const height = musicPlaying ? 2 + 16 * level : 2;
+        bar.size = new Vec2(1, height);
     }
 }
 function updateMenuSlider(mouseX) {
@@ -766,8 +789,11 @@ function handleContextHold() {
 }
 
 export function mediaPropertiesChanged(event) {
+    if (playbackPoseHeld) return;
     mediaTitle = event.title || 'Unknown track';
+    titleScroll = 0;
     mediaArtist = event.artist || 'Unknown artist';
+    artistScroll = 0;
     mediaAlbum = event.albumTitle || '';
     // New song metadata arrives before its optional new timeline.
     mediaPosition=0; mediaDuration=0; mediaTimelineAt=-1;
@@ -776,6 +802,7 @@ export function mediaThumbnailChanged(event) {
     mediaHasArt = !!event.hasThumbnail;
 }
 export function mediaTimelineChanged(event) {
+    if (playbackPoseHeld) return;
     if (typeof event.position === 'number' && isFinite(event.position))
         mediaPosition = Math.max(0,event.position);
     if (typeof event.duration === 'number' && isFinite(event.duration))

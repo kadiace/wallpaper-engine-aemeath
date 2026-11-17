@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "Aemeath text viewport",
+  "passes": [{
+    "material": "materials/effects/aemeath_marquee.json",
+    "bind": [{"name": "previous", "index": 0}]
+  }],
+  "dependencies": [
+    "materials/effects/aemeath_marquee.json",
+    "shaders/effects/aemeath_marquee.frag",
+    "shaders/effects/aemeath_marquee.vert"
+  ]
+}
