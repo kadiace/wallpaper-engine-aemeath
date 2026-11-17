@@ -29,7 +29,7 @@ let playbackPoseHeld = false;
 let falling = false, fallSpeed = 0;
 let target = null;
 let actionDelay = 3;
-let screenDelay = 20, screenPlayLeft = 0;
+let screenDelay = 20;
 let armed = false, dragging = false, dragged = false;
 let grabX = 0, grabY = 0, pressX = 0, pressY = 0;
 let suppressClickUntil = 0;
@@ -111,9 +111,6 @@ function changeScreen() {
         animation.stop();
         animation.setFrame(0);
         animation.play();
-        screenPlayLeft = animation.duration;
-    } else {
-        screenPlayLeft = 0.96;
     }
 }
 
@@ -149,9 +146,14 @@ function releaseGrab() {
         dragged = true;
         suppressClickUntil = elapsed + 0.25;
         stayOnScreen();
-        // Pick a different idle animation than the one shown before dragging.
-        setIdle(true);
-        actionDelay = random(2.5, 4);
+        if (mode === 'B') {
+            falling = true;
+            fallSpeed = 0;
+        } else {
+            // Pick a different idle animation than the one shown before dragging.
+            setIdle(true);
+            actionDelay = random(2.5, 4);
+        }
         persist();
     }
     armed = false;
@@ -226,17 +228,15 @@ function processEvents() {
             pointerDownTime = ev.at;
             pointerDownX = ev.x;
             pointerDownY = ev.y;
-            if (mode === 'A') {
-                armed = true;
-                dragging = false;
-                dragged = false;
-                pressX = ev.x;
-                pressY = ev.y;
-                grabX = x - ev.x;
-                grabY = y - ev.y;
-                target = null;
-                action = 'idle';
-            }
+            armed = true;
+            dragging = false;
+            dragged = false;
+            pressX = ev.x;
+            pressY = ev.y;
+            grabX = x - ev.x;
+            grabY = y - ev.y;
+            target = null;
+            action = 'idle';
         } else if (ev.type === 'up') {
             if (!pointerPressed) continue;
             pointerPressed = false;
@@ -263,7 +263,7 @@ function processEvents() {
     }
 }
 
-function stepA(dt) {
+function stepDrag() {
     if (armed) {
         if (!input.cursorLeftDown) {
             releaseGrab();
@@ -277,6 +277,7 @@ function stepA(dt) {
                 if (dragging || dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) {
                     const oldX = x;
                     dragging = true;
+                    manualVisual = null;
                     action = 'drag';
                     x = cursor.x + grabX;
                     y = cursor.y + grabY;
@@ -284,9 +285,14 @@ function stepA(dt) {
                     if (Math.abs(x - oldX) > 0.1) facing = x > oldX ? 1 : -1;
                 }
             }
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+function stepA(dt) {
+    if (stepDrag()) return;
     if (musicPlaying || playbackPoseHeld || menuOpen || manualVisual) return;
     if (action === 'move' && target) {
         const dx = target.x - x, dy = target.y - y;
@@ -312,6 +318,13 @@ function stepA(dt) {
 }
 
 function stepB(dt) {
+    if (stepDrag()) {
+        if (dragging) {
+            falling = false;
+            fallSpeed = 0;
+        }
+        return;
+    }
     if (falling) {
         fallSpeed += 1400 * dt;
         y -= fallSpeed * dt;
@@ -326,16 +339,6 @@ function stepB(dt) {
     }
     if (menuOpen || manualVisual) return;
     screenDelay -= dt;
-    if (screenPlayLeft > 0) {
-        screenPlayLeft -= dt;
-        if (screenPlayLeft <= 0) {
-            const animation = layers[screenName].getTextureAnimation();
-            if (animation) {
-                animation.setFrame(0);
-                animation.pause();
-            }
-        }
-    }
     if (!falling && screenDelay <= 0) changeScreen();
 }
 
@@ -416,10 +419,7 @@ export function init() {
     if (mode === 'B') {
         y = canvasHalfSize();
         const animation = layers[screenName].getTextureAnimation();
-        if (animation) {
-            animation.setFrame(0);
-            animation.pause();
-        }
+        if (animation) animation.play();
         screenDelay = random(10, 30);
     }
     initUi();
