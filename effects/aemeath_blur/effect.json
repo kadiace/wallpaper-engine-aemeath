@@ -1,12 +1,70 @@
 {
   "version": 1,
-  "name": "Aemeath album background blur",
-  "passes": [{
-    "material": "materials/effects/aemeath_blur.json",
-    "bind": [{"name": "previous", "index": 0}]
-  }],
+  "name": "Aemeath album background dual Kawase blur",
+  "passes": [
+    {
+      "material": "materials/effects/aemeath_blur_down.json",
+      "target": "aemeath_half_a",
+      "bind": [
+        {
+          "name": "previous",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "material": "materials/effects/aemeath_blur_down.json",
+      "target": "aemeath_quarter",
+      "bind": [
+        {
+          "name": "aemeath_half_a",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "material": "materials/effects/aemeath_blur_up.json",
+      "target": "aemeath_half_b",
+      "bind": [
+        {
+          "name": "aemeath_quarter",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "material": "materials/effects/aemeath_blur.json",
+      "bind": [
+        {
+          "name": "aemeath_half_b",
+          "index": 0
+        }
+      ]
+    }
+  ],
+  "fbos": [
+    {
+      "name": "aemeath_half_a",
+      "scale": 2,
+      "format": "rgba_backbuffer"
+    },
+    {
+      "name": "aemeath_quarter",
+      "scale": 3,
+      "format": "rgba_backbuffer"
+    },
+    {
+      "name": "aemeath_half_b",
+      "scale": 2,
+      "format": "rgba_backbuffer"
+    }
+  ],
   "dependencies": [
+    "materials/effects/aemeath_blur_down.json",
+    "materials/effects/aemeath_blur_up.json",
     "materials/effects/aemeath_blur.json",
+    "shaders/effects/aemeath_blur_down.frag",
+    "shaders/effects/aemeath_blur_up.frag",
     "shaders/effects/aemeath_blur.frag",
     "shaders/effects/aemeath_blur.vert"
   ]

@@ -1,0 +1,11 @@
+{
+  "passes": [
+    {
+      "blending": "normal",
+      "cullmode": "nocull",
+      "depthtest": "disabled",
+      "depthwrite": "disabled",
+      "shader": "effects/aemeath_blur_down"
+    }
+  ]
+}

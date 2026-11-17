@@ -520,6 +520,10 @@ let uiReady = false;
 let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
 let titleScroll = 0, artistScroll = 0;
 let mediaAlbum = '', mediaHasArt = false;
+// The background effect blends toward the album's primary media color.
+let mediaBlurEffect = null;
+let mediaTintCurrent = new Vec3(0.13, 0.14, 0.20);
+let mediaTintTarget = new Vec3(0.13, 0.14, 0.20);
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
 const audioBuffers = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_64);
 function canvasHalfSize() {
@@ -576,6 +580,8 @@ function initUi() {
     makeBlock('media_outer', 264, 264, UI_STYLE.border);
     makeBlock('media_cover_empty', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.panel);
     const cover = thisScene.getLayer('media_album_cover');
+    mediaBlurEffect = cover ? cover.getEffect(0) : null;
+    if (mediaBlurEffect) mediaBlurEffect.setMaterialProperty('AlbumTint', mediaTintCurrent);
     const fallback = ui.media_cover_empty;
     if (cover && fallback)
         thisScene.sortLayer(cover, thisScene.getLayerIndex(fallback) + 1);
@@ -646,7 +652,9 @@ function updateUiGeometry() {
         cover.visible = bubble && mediaHasArt;
         if (cover.visible) uiPosition(cover, mx, my);
     }
-    place('media_info_shade', 0, 0, bubble);
+    // Artwork shading now happens inside the final Kawase pass. Keep this
+    // legacy dark wash for the empty-art fallback only (avoid double shading).
+    place('media_info_shade', 0, 0, bubble && !mediaHasArt);
     const jacket = thisScene.getLayer('media_jacket');
     if (jacket) {
         jacket.visible = bubble && mediaHasArt;
@@ -712,7 +720,24 @@ function marquee(name, value, windowSize, stepWidth, clock, dt) {
     layer.getEffect(0).setMaterialProperty('Scroll', offset);
     return clock;
 }
+function updateMediaTint(dt) {
+    if (!mediaBlurEffect) return;
+    // Frame-rate-independent easing, including while paused/held.
+    const blend = 1 - Math.exp(-Math.max(0, dt) * 5);
+    const from = mediaTintCurrent, to = mediaTintTarget;
+    const next = new Vec3(
+        from.x + (to.x - from.x) * blend,
+        from.y + (to.y - from.y) * blend,
+        from.z + (to.z - from.z) * blend
+    );
+    if (Math.abs(next.x - from.x) + Math.abs(next.y - from.y) +
+        Math.abs(next.z - from.z) > 0.0001) {
+        mediaTintCurrent = next;
+        mediaBlurEffect.setMaterialProperty('AlbumTint', mediaTintCurrent);
+    }
+}
 function updateMediaData(dt) {
+    updateMediaTint(dt);
     if (musicPlaying && mediaTimelineAt>=0 && mediaDuration>0)
         mediaPosition=clamp(mediaPosition+dt,0,mediaDuration);
     if (ui.media_title) {
@@ -800,6 +825,14 @@ export function mediaPropertiesChanged(event) {
 }
 export function mediaThumbnailChanged(event) {
     mediaHasArt = !!event.hasThumbnail;
+    const color = mediaHasArt ? event.primaryColor : null;
+    if (color && isFinite(color.x) && isFinite(color.y) && isFinite(color.z)) {
+        mediaTintTarget = new Vec3(
+            clamp(color.x, 0, 1), clamp(color.y, 0, 1), clamp(color.z, 0, 1)
+        );
+    } else {
+        mediaTintTarget = new Vec3(0.13, 0.14, 0.20);
+    }
 }
 export function mediaTimelineChanged(event) {
     if (playbackPoseHeld) return;
