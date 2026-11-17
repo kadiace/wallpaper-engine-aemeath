@@ -53,3 +53,7 @@ Official docs:
 ## Further input fixes
 
 A 650ms hold sets a dedicated `menuHoldOpened` flag, and the corresponding release is ignored as a normal click (even if the mouse was held much longer). Changing scale no longer moves the menu itself. When the media provider supplies no timeline, the time readout displays `--:-- / --:--` rather than implying a valid 0:00 duration.
+
+## Audio registration fix
+
+SceneScript requires `engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16)` to be called **once at global scope**. It is now stored as `const spectrum` outside `updateMediaData()`; the per-frame UI updater only reads `spectrum.average[0..15]`. Do not move registration into any function, `init()`, or conditional block. This fixes the parser error `registerAudioBuffers can only be called from global scope`.

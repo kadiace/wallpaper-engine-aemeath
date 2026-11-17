@@ -513,7 +513,9 @@ let mediaTitle = 'Unknown track', mediaArtist = 'Unknown artist';
 let mediaAlbum = '', mediaHasArt = false;
 let mediaPosition = 0, mediaDuration = 0, mediaTimelineAt = -1;
 let mediaPaused = false;
-let spectrum = null;
+// Must be declared at SceneScript global scope, not inside updateMediaData().
+// Reuse the registered buffer in every frame; never register it during update.
+const spectrum = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
 let levels = new Array(16).fill(0);
 
 function canvasHalfSize() {
@@ -700,8 +702,7 @@ function updateMediaData(dt) {
         ui.media_transport_play.text=mediaPaused ? '>' : 'II';
         ui.menu_scale_label.text='SCALE '+sizeMultiplier.toFixed(2)+'x';
     }
-    if (!spectrum && engine.registerAudioBuffers)
-        spectrum=engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
+
     if (spectrum && spectrum.average) {
         for(let i=0;i<16;i++){
             const raw=Math.max(0,Math.min(1,Number(spectrum.average[i])||0));
