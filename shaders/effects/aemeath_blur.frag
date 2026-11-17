@@ -39,7 +39,7 @@ void main() {
 
     // Static, very fine grain to reduce low-resolution color banding.
     vec2 pixel = floor(v_TexCoord * vec2(256.0, 256.0));
-    float grain = fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    float grain = frac(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
     graded = clamp(graded + vec3(grain * 0.008, grain * 0.008, grain * 0.008), 0.0, 1.0);
     gl_FragColor = vec4(graded, color.a);
 }
