@@ -1,35 +1,32 @@
-# Aemeath media speech bubble — layout v2
+# Aemeath — square album-art bubble (overlay layout)
 
-Wallpaper Engine scene: FHD 1920×1080. Aemeath supports A/B idle/roam/screen behaviors, dragging, a stationary long-press menu, live 0–2× scaling, and media-triggered `aemeath` sprite.
+Media UI design: the album jacket is the **256×256 1:1 full background** of the character-following square speech bubble. The art is NOT positioned as a separate image on the left. The artist, track title, timeline and play progress all sit ON TOP OF the jacket.
 
-## Media speech bubble (no transport buttons)
+## Media bubble layer order (back -> front)
+1. `media_outer`: pixel border, 264×264
+2. `media_cover_empty`: square fallback background, 256×256
+3. `media_album_cover`: Windows media cover texture, 256×256, 1:1
+4. `media_info_shade`: dark alpha 0.84 scrim in bottom 142px, over album for legibility
+5. `media_title`: 18pt, max width 222
+6. `media_artist`: 13pt, max width 222
+7. `media_progress_back` and `media_progress_fill`: 222×6
+8. `media_time_current` and `media_time_total`: 11pt
+9. Sixteen audio-frequency spectrum bars overlay the cover in its top region.
 
-- The **current album cover is a 176×176 square** (1:1). Its image model lives in `models/aemeath_album_cover.json` and material in `materials/aemeath_album_cover.json`.
-- The cover's `genericimage4` material now declares `textures: ["$mediaThumbnail"]` (a single system texture name string), not an object masquerading as a texture. Wallpaper Engine swaps the content of the special media thumbnail texture when media art arrives.
-- The existing cover layer is sorted **above** the dynamically created dark cover placeholder and **below** the subsequently created title, artist, progress/timeline and spectrum. The cover layer is visible throughout playback; it is no longer hidden until the optional `mediaThumbnailChanged` event arrives.
-- **Pixel bubble:** 480×248 including 4px border; inner 472×240, art left and metadata column right. Title: 20pt; artist: 14pt; current and total time each 11pt. Progress track: 228×6. Original 16 audio-frequency bars remain at the bottom of the metadata column. Speech bubble follows Aemeath and stays inside the canvas.
-- The entire layout and palette are configurable via `UI_LAYOUT` and `UI_STYLE` in `scripts/companion.js`; swapping the visual skin won't require changing behavior code. Metadata and play time are optional and display safe placeholders if missing.
-- **Previous/Play-Pause/Next controls removed** from the dynamic UI, static Scene layers and `project.json` shortcut properties. This speech bubble is now display-only.
+The bubble stays attached above the companion and is clamped inside the 1920×1080 Scene. The original media controls remain removed. The title, artist and progress/time hierarchy is readable without needing a second horizontal information panel.
 
-## Album art troubleshooting
+The look-and-feel can be adjusted by changing `UI_STYLE` and `UI_LAYOUT` inside `scripts/companion.js`, separately from character and media state logic. The `scene.json` Aemeath Origin script embeds an identical controller copy.
 
-The official Wallpaper Engine integration uses **Albedo texture → Bind Album Cover → Current album cover** on the selected image layer. If the new system-texture material does not render in the Windows Wallpaper Engine editor, select the `media_album_cover` image in the Scene editor, then open **Advanced Texture Settings**, click the gear next to **Albedo**, choose **Bind Album Cover**, select **Current album cover**, and save. This editor-native binding is the authoritative fallback; the serialized form may vary by editor version. The original album cover area remains square after binding.
+## Album art requirements
 
-Windows media integration must be enabled and the current media player must provide cover art through the Windows media overlay; some media players provide only a title and artist. If no artwork is available, the square placeholder remains visible.
+The art layer reads the current-media `$mediaThumbnail` texture declared in `materials/aemeath_album_cover.json`. Actual thumbnail delivery depends on the Windows media player and Wallpaper Engine media integration. Wallpaper Engine's documented guaranteed editor workflow is to choose `media_album_cover` in the scene editor → Advanced Texture Settings → Albedo → Bind Album Cover → Current album cover → Save. The runtime code does not fabricate a jacket when media does not provide one.
 
-## Runtime checks
+## Preview checklist
 
-1. `git pull origin master`, reopen the wallpaper's Scene editor and select Run Preview.
-2. Play music from a Windows-media-integrated player. Confirm album art visible at left, title and artist at right, two time labels and progress bar underneath, 16 frequency bars at bottom.
-3. Verify no transport controls remain in the Scene or user settings.
-4. Drag Aemeath while music plays. The bubble and album art should follow the character without changing the GIF.
-5. Pause or stop music and confirm the bubble hides. Return to A/B interaction and the long-press menu.
+1. Open the current master in Wallpaper Engine's editor and Run Preview with a music player that provides album art.
+2. Confirm the square cover fills the ENTIRE bubble with no side-by-side cover column. Title / artist / progress / times overlay the cover at bottom; the spectrum remains above.
+3. Confirm the dark overlay improves readability on both bright and dark artwork.
+4. Drag the character while media plays: the 256×256 bubble follows the character and is constrained to the FHD scene.
+5. Pause/stop playback: the bubble hides. Prior A/B interactions, manual animation menu, and 0–2× scale continue working.
 
-## Code structure
-
-- `scene.json`: 17 static layers (14 GIFs, character hitbox, menu hitbox, album cover).
-- `scripts/companion.js`: main Aemeath logic plus configurable UI skin (embedded identically in `scene.json` as aemeath origin script).
-- `models/aemeath_album_cover.json` and `materials/aemeath_album_cover.json`: square image with special media cover system texture.
-- `project.json`: previous/play/next User Shortcut properties removed.
-
-Wallpaper Engine docs: https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html
+Docs: https://docs.wallpaperengine.io/en/scene/audiovisualizer/albumcover.html

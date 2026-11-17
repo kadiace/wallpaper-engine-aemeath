@@ -496,13 +496,13 @@ const UI_STYLE = {
     highlight: "0.26 0.29 0.41"
 };
 const UI_LAYOUT = {
-    // Media speech bubble skin: larger 1:1 album cover + right-aligned content column.
-    // Change these measurements to reskin without touching the media/controller logic.
-    mediaW: 472, mediaH: 240,
-    coverSize: 176, coverX: -134, coverY: 15,
-    infoX: 101, titleY: 69, artistY: 34,
-    progressWidth: 228, progressX: 99, progressY: -29,
-    clockY: -53, spectrumBaseY: -104,
+    // Square album-cover speech bubble. All text and the timeline OVERLAY the art.
+    // Swap this skin without modifying media playback or companion behavior.
+    mediaW: 256, mediaH: 256,
+    infoShadeH: 142, infoShadeY: -57,
+    titleY: -14, artistY: -42,
+    progressWidth: 222, progressY: -85,
+    clockY: -109, spectrumBaseY: 82,
     menuW: 252, menuH: 348,
     rowStart: 30, rowHeight: 22, sliderTop: 304, sliderHalf: 100
 };
@@ -537,11 +537,12 @@ function uiPosition(layer, px, py) {
     if (!p || Math.abs(p.x-px) > 0.1 || Math.abs(p.y-py) > 0.1)
         layer.origin = new Vec3(px, py, 0);
 }
-function makeBlock(name, w, h, color) {
+function makeBlock(name, w, h, color, opacity) {
     const layer = thisScene.createLayer({
         name: name, image: 'models/util/solidlayer.json',
         origin: '0 0 0', size: w + ' ' + h,
-        color: color, alpha: 1, visible: false, solid: false
+        color: color, alpha: opacity === undefined ? 1 : opacity,
+        visible: false, solid: false
     });
     ui[name] = layer;
     return layer;
@@ -561,26 +562,25 @@ function makeText(name, initial, pt, maxwidth, color, alignment) {
 function initUi() {
     if (uiReady) return;
     uiReady = true;
-    makeBlock('media_outer', 480, 248, UI_STYLE.border);
-    makeBlock('media_inner', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.background);
-    makeBlock('media_tail', 22, 12, UI_STYLE.border);
-    makeBlock('media_cover_frame', UI_LAYOUT.coverSize + 8,
-        UI_LAYOUT.coverSize + 8, UI_STYLE.border);
-    makeBlock('media_cover_empty', UI_LAYOUT.coverSize,
-        UI_LAYOUT.coverSize, UI_STYLE.panel);
-    // Existing media texture must be ABOVE the dynamic background & placeholder
-    // but BELOW text, progress, and spectrum layers created next.
+    // LAYER ORDER (back -> front): border, fallback, album artwork,
+    // translucent reading shade, song text, timeline and frequency spectrum.
+    makeBlock('media_outer', 264, 264, UI_STYLE.border);
+    makeBlock('media_cover_empty', UI_LAYOUT.mediaW, UI_LAYOUT.mediaH, UI_STYLE.panel);
     const cover = thisScene.getLayer('media_album_cover');
-    const coverBackground = ui.media_cover_empty;
-    if (cover && coverBackground)
-        thisScene.sortLayer(cover, thisScene.getLayerIndex(coverBackground) + 1);
-    makeText('media_title', mediaTitle, 20, 232, UI_STYLE.text, 'left');
-    makeText('media_artist', mediaArtist, 14, 232, UI_STYLE.muted, 'left');
+    const fallback = ui.media_cover_empty;
+    if (cover && fallback)
+        thisScene.sortLayer(cover, thisScene.getLayerIndex(fallback) + 1);
+    makeBlock('media_info_shade', UI_LAYOUT.mediaW,
+        UI_LAYOUT.infoShadeH, UI_STYLE.background, 0.84);
+    makeBlock('media_tail', 20, 12, UI_STYLE.border);
+    makeText('media_title', mediaTitle, 18, 222, UI_STYLE.text, 'left');
+    makeText('media_artist', mediaArtist, 13, 222, UI_STYLE.text, 'left');
     makeBlock('media_progress_back', UI_LAYOUT.progressWidth, 6, UI_STYLE.highlight);
     makeBlock('media_progress_fill', 1, 6, UI_STYLE.accent);
-    makeText('media_time_current', '--:--', 11, 90, UI_STYLE.text, 'left');
-    makeText('media_time_total', '--:--', 11, 90, UI_STYLE.muted, 'right');
-    for (let i = 0; i < 16; i++) makeBlock('media_band_' + i, 8, 3, UI_STYLE.accent);
+    makeText('media_time_current', '--:--', 11, 80, UI_STYLE.text, 'left');
+    makeText('media_time_total', '--:--', 11, 80, UI_STYLE.text, 'right');
+    for (let i = 0; i < 16; i++)
+        makeBlock('media_band_' + i, 7, 3, UI_STYLE.accent);
     makeBlock('menu_outer', 258, 354, UI_STYLE.border);
     makeBlock('menu_inner', 252, 348, UI_STYLE.background);
     makeText('menu_heading', 'AEMEATH / ACTION', 15, 234, UI_STYLE.accent);
@@ -614,39 +614,32 @@ function showMenu() {
 function updateUiGeometry() {
     if (!uiReady) return;
     const size = bounds();
-    // The speech bubble is 16:9-ish overall, while cover art is always exactly 1:1.
-    // Clamp the entire bubble, not individual labels, to avoid broken alignment.
+    // The jacket is the square background of the ENTIRE bubble.
+    // Constrain the entire square, keeping typography and progress aligned.
     mediaCenterX = clamp(x, UI_LAYOUT.mediaW/2 + 8,
         size.width - UI_LAYOUT.mediaW/2 - 8);
     mediaCenterY = clamp(y + canvasHalfSize() + UI_LAYOUT.mediaH/2 + 24,
         UI_LAYOUT.mediaH/2 + 8, size.height - UI_LAYOUT.mediaH/2 - 8);
     const mx = mediaCenterX, my = mediaCenterY;
     const bubble = musicPlaying;
-    const place = (name, ox, oy, visible) => {
-        const layer = ui[name];
-        if (!layer) return;
+    const place = (name,ox,oy,visible) => {
+        const layer = ui[name]; if (!layer) return;
         layer.visible = visible;
         if (visible) uiPosition(layer, mx + ox, my + oy);
     };
     place('media_outer', 0, 0, bubble);
-    place('media_inner', 0, 0, bubble);
-    place('media_tail', clamp(x-mx,-184,184), -126, bubble);
-    place('media_cover_frame', UI_LAYOUT.coverX, UI_LAYOUT.coverY, bubble);
-    // Show fallback behind the album texture. When Wallpaper Engine has no art,
-    // its system texture is transparent, revealing the fallback automatically.
-    place('media_cover_empty', UI_LAYOUT.coverX, UI_LAYOUT.coverY, bubble);
+    place('media_cover_empty', 0, 0, bubble);
     const cover = thisScene.getLayer('media_album_cover');
     if (cover) {
-        // Do NOT gate the artwork on a mediaThumbnailChanged callback.
-        // The native $mediaThumbnail texture updates independently of the event.
         cover.visible = bubble;
-        if (bubble) uiPosition(cover, mx + UI_LAYOUT.coverX,
-            my + UI_LAYOUT.coverY);
+        if (bubble) uiPosition(cover, mx, my);
     }
-    place('media_title', UI_LAYOUT.infoX, UI_LAYOUT.titleY, bubble);
-    place('media_artist', UI_LAYOUT.infoX, UI_LAYOUT.artistY, bubble);
-    place('media_progress_back', UI_LAYOUT.progressX,
-        UI_LAYOUT.progressY, bubble);
+    // Dark translucent scrim is ABOVE the jacket, not beside it.
+    place('media_info_shade', 0, UI_LAYOUT.infoShadeY, bubble);
+    place('media_tail', clamp(x-mx,-92,92), -134, bubble);
+    place('media_title', 0, UI_LAYOUT.titleY, bubble);
+    place('media_artist', 0, UI_LAYOUT.artistY, bubble);
+    place('media_progress_back', 0, UI_LAYOUT.progressY, bubble);
     const progress = ui.media_progress_fill;
     const fraction = mediaDuration > 0 ?
         clamp(mediaPosition / mediaDuration, 0, 1) : 0;
@@ -655,21 +648,20 @@ function updateUiGeometry() {
         if (bubble) {
             const width = Math.max(1, UI_LAYOUT.progressWidth * fraction);
             progress.size = new Vec2(width, 6);
-            uiPosition(progress,
-                mx + UI_LAYOUT.progressX - UI_LAYOUT.progressWidth/2 + width/2,
+            uiPosition(progress, mx - UI_LAYOUT.progressWidth/2 + width/2,
                 my + UI_LAYOUT.progressY);
         }
     }
-    place('media_time_current', 19, UI_LAYOUT.clockY, bubble);
-    place('media_time_total', 181, UI_LAYOUT.clockY, bubble);
-    for (let i = 0; i < 16; i++) {
-        const bar = ui['media_band_' + i];
-        if (!bar) continue;
-        bar.visible = bubble;
+    place('media_time_current', -69, UI_LAYOUT.clockY, bubble);
+    place('media_time_total', 69, UI_LAYOUT.clockY, bubble);
+    // Small spectrum floats in the artwork's upper region.
+    for (let i=0; i<16; i++) {
+        const bar=ui['media_band_'+i]; if (!bar) continue;
+        bar.visible=bubble;
         if (bubble) {
-            const height = 3 + Math.round(levels[i] * 27);
-            bar.scale = new Vec3(1, height/3, 1);
-            uiPosition(bar, mx - 9 + i * 14.2,
+            const height=3 + Math.round(levels[i]*26);
+            bar.scale=new Vec3(1,height/3,1);
+            uiPosition(bar, mx - 99 + i*13.2,
                 my + UI_LAYOUT.spectrumBaseY + height/2);
         }
     }

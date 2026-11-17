@@ -1,6 +1,6 @@
 {
-  "height": 176,
-  "width": 176,
+  "height": 256,
+  "width": 256,
   "material": "materials/aemeath_album_cover.json",
   "nopadding": true
 }
