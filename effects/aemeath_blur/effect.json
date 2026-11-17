@@ -1,10 +1,17 @@
 {
   "version": 1,
-  "name": "Aemeath album background blur",
-  "passes": [{
-    "material": "materials/effects/aemeath_blur.json",
-    "bind": [{"name": "previous", "index": 0}]
-  }],
+  "name": "Aemeath album background Gaussian blur",
+  "passes": [
+    {
+      "material": "materials/effects/aemeath_blur.json",
+      "bind": [
+        {
+          "name": "previous",
+          "index": 0
+        }
+      ]
+    }
+  ],
   "dependencies": [
     "materials/effects/aemeath_blur.json",
     "shaders/effects/aemeath_blur.frag",
