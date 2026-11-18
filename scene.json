@@ -52,13 +52,15 @@
 		{
 			"disablepropagation" : false,
 			"id" : 117,
+			"locktransforms" : true,
 			"name" : "",
-			"origin" : "960.00000 540.00000 0.00000",
 			"solid" : true
 		},
 		{
+			"angles" : "0.00000 -0.00000 0.00000",
 			"disablepropagation" : false,
 			"id" : 118,
+			"locktransforms" : true,
 			"name" : "",
 			"parent" : 117,
 			"solid" : true
@@ -241,6 +243,7 @@
 			"angles" : "0.00000 -0.00000 0.00000",
 			"disablepropagation" : false,
 			"id" : 224,
+			"locktransforms" : true,
 			"name" : "",
 			"parent" : 117,
 			"solid" : true

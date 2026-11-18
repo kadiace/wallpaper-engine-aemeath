@@ -8,7 +8,7 @@
       "depthwrite": "disabled",
       "shader": "genericimage4",
       "textures": [
-        "$mediaThumbnail"
+        "idle4"
       ],
       "usertextures": [
         {
