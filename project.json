@@ -1,4 +1,6 @@
 {
+	"contentrating" : "Everyone",
+	"description" : "Here comes the ghost, boo—",
 	"file" : "scene.json",
 	"general" : 
 	{
@@ -17,6 +19,8 @@
 		"supportsvideoflags" : 2
 	},
 	"preview" : "preview.jpg",
+	"ratingsex" : "none",
+	"ratingviolence" : "none",
 	"tags" : [ "Unspecified" ],
 	"title" : "Aemeath, Digital Ghost",
 	"type" : "scene",
