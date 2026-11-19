@@ -389,6 +389,14 @@ export function init() {
         layers[NAMES[i]] = thisScene.getLayer(NAMES[i]);
         if (layers[NAMES[i]]) layers[NAMES[i]].solid = false;
     }
+    // Imported assets may acquire a translated/scaled parent. All positions below
+    // use screen coordinates, just like the UI layers created without a parent.
+    const screenLayers = NAMES.concat(['companion_hitbox', 'menu_hitbox',
+        'media_album_cover', 'media_jacket', 'media_title', 'media_artist']);
+    for (let i = 0; i < screenLayers.length; i++) {
+        const layer = thisScene.getLayer(screenLayers[i]);
+        if (layer && layer.getParent()) layer.setParent(undefined, false);
+    }
     hitbox = thisScene.getLayer('companion_hitbox');
     if (hitbox) {
         hitbox.solid = true;
