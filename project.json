@@ -18,11 +18,10 @@
 		"supportsvideo" : true,
 		"supportsvideoflags" : 2
 	},
-	"preview" : "",
 	"ratingsex" : "none",
 	"ratingviolence" : "none",
 	"tags" : [ "Unspecified" ],
 	"title" : "Aemeath, Digital Ghost",
-	"type" : "Scene",
+	"type" : "scene",
 	"version" : 0
 }

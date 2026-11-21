@@ -681,7 +681,7 @@ function updateUiGeometry() {
         progress.visible = bubble;
         if (bubble) {
             const width = Math.max(1, UI_LAYOUT.progressWidth * fraction);
-            progress.size = new Vec2(width, 5);
+            progress.scale = new Vec3(width, 1, 1);
             uiPosition(progress, mx - UI_LAYOUT.progressWidth/2 + width/2,
                 my + UI_LAYOUT.progressY);
         }
@@ -763,8 +763,7 @@ function updateMediaData(dt) {
         const bar = ui['media_spectrum_' + i];
         if (!bar) continue;
         const level = audioBuffers ? Math.min(1, Math.max(0, audioBuffers.average[i] || 0)) : 0;
-        const height = musicPlaying ? 2 + 16 * level : 2;
-        bar.size = new Vec2(1, height);
+        bar.scale = new Vec3(1, 1 + 8 * level, 1);
     }
 }
 function updateMenuSlider(mouseX) {
@@ -823,13 +822,17 @@ function handleContextHold() {
 
 export function mediaPropertiesChanged(event) {
     if (playbackPoseHeld) return;
-    mediaTitle = event.title || 'Unknown track';
+    const title = event.title || 'Unknown track';
+    const artist = event.artist || 'Unknown artist';
+    if (title !== mediaTitle || artist !== mediaArtist) {
+        // Metadata can be re-sent for the same song after a timeline report.
+        mediaPosition=0; mediaDuration=0; mediaTimelineAt=-1;
+    }
+    mediaTitle = title;
     titleScroll = 0;
-    mediaArtist = event.artist || 'Unknown artist';
+    mediaArtist = artist;
     artistScroll = 0;
     mediaAlbum = event.albumTitle || '';
-    // New song metadata arrives before its optional new timeline.
-    mediaPosition=0; mediaDuration=0; mediaTimelineAt=-1;
 }
 export function mediaThumbnailChanged(event) {
     mediaHasArt = !!event.hasThumbnail;
@@ -843,10 +846,10 @@ export function mediaThumbnailChanged(event) {
     }
 }
 export function mediaTimelineChanged(event) {
-    if (playbackPoseHeld) return;
     if (typeof event.position === 'number' && isFinite(event.position))
         mediaPosition = Math.max(0,event.position);
-    if (typeof event.duration === 'number' && isFinite(event.duration))
-        mediaDuration = Math.max(0,event.duration);
+    // Seeking may briefly report zero duration; retain the last valid track length.
+    if (typeof event.duration === 'number' && isFinite(event.duration) && event.duration > 0)
+        mediaDuration = event.duration;
     mediaTimelineAt = Date.now();
 }
